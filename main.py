@@ -1,9 +1,12 @@
-import subprocess
+import asyncio
+from botua import run_ua_bot
+from botru import run_ru_bot
 
-# Запускаємо два скрипти одночасно
-subprocess.Popen(["python", "botua.py"])
-subprocess.Popen(["python", "botru.py"])
+async def main():
+    await asyncio.gather(
+        run_ua_bot(),
+        run_ru_bot()
+    )
 
-# Можна додати лог або інфо
-print("🔄 Обидва боти запущено. Не закривайте це вікно.")
-input("Натисніть Enter для виходу...")
+if __name__ == "__main__":
+    asyncio.run(main())
