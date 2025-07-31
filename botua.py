@@ -1,5 +1,7 @@
 import logging
 import asyncio
+import json
+import os
 from aiogram import Bot, Dispatcher, executor, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.dispatcher import FSMContext
@@ -22,6 +24,27 @@ banned_users = set()
 user_ads = {"buy": [], "sell": []}
 def banks(*names):
     return list(names)
+
+BALANCE_FILE = "balances.json"
+
+# --- Завантаження балансу ---
+def load_balances():
+    global user_balances
+    if os.path.exists(BALANCE_FILE):
+        with open(BALANCE_FILE, "r") as f:
+            user_balances = json.load(f)
+            user_balances = {int(k): v for k, v in user_balances.items()}
+    else:
+        user_balances = {}
+
+# --- Збереження балансу ---
+def save_balances():
+    with open(BALANCE_FILE, "w") as f:
+        json.dump(user_balances, f, indent=2)
+
+# Завантаження при запуску
+load_balances()
+
 
 def ad(u, r, lim, b, cur="USDT (TRC20)", t="sell", terms="Без дополнительных условий"):
     return {
@@ -214,13 +237,9 @@ async def add_usdt_handler(message: types.Message):
         user_id = int(parts[1])
         amount = float(parts[2])
 
-        # Инициализация баланса
-        if user_id not in user_balances:
-            user_balances[user_id] = {}
-        if "USDT (TRC20)" not in user_balances[user_id]:
-            user_balances[user_id]["USDT (TRC20)"] = 0.0
-
+        ensure_balance(user_id)
         user_balances[user_id]["USDT (TRC20)"] += amount
+        save_balances()
 
         await message.answer(
             f"✅ Пользователю <code>{user_id}</code> зачислено {amount} USDT (TRC20)."
@@ -236,6 +255,61 @@ async def add_usdt_handler(message: types.Message):
 
     except Exception as e:
         await message.answer(f"❗ Ошибка: {e}")
+
+@dp.message_handler(commands=["dedusdt"])
+async def ded_usdt_handler(message: types.Message):
+    if message.from_user.id not in ADMIN_IDS:
+        return await message.answer("⛔ Команда доступна только администраторам.")
+
+    try:
+        text = message.text.replace("\n", " ").strip()
+        parts = text.split()
+
+        if len(parts) != 3:
+            return await message.answer(
+                "❗ Неверный формат.\nПример:\n<code>/dedusdt 123456789 5</code>"
+            )
+
+        user_id = int(parts[1])
+        amount = float(parts[2])
+
+        ensure_balance(user_id)
+
+        current_balance = user_balances[user_id]["USDT (TRC20)"]
+        if current_balance < amount:
+            return await message.answer("⚠️ Недостаточно средств для списания.")
+
+        user_balances[user_id]["USDT (TRC20)"] -= amount
+        save_balances()
+
+        await message.answer(
+            f"✅ С пользователя <code>{user_id}</code> списано {amount} USDT (TRC20)."
+        )
+
+        try:
+            await bot.send_message(
+                user_id,
+                f"🔻 С вашего баланса списано <b>{amount} USDT (TRC20)</b>."
+            )
+        except:
+            await message.answer("⚠️ Не удалось отправить сообщение пользователю.")
+
+    except Exception as e:
+        await message.answer(f"❗ Ошибка: {e}")
+
+
+@dp.message_handler(commands=["backup"])
+async def send_backup_file(message: types.Message):
+    if message.from_user.id not in ADMIN_IDS:
+        return await message.answer("⛔ Команда доступна только администраторам.")
+
+    try:
+        with open(BALANCE_FILE, "rb") as f:
+            await bot.send_document(message.chat.id, f, caption="📂 Резервная копия баланса")
+    except FileNotFoundError:
+        await message.answer("⚠️ Файл баланса ещё не создан.")
+
+
 
 @dp.message_handler(lambda m: m.text == "📥 Пополнить баланс")
 @ban_check
