@@ -196,30 +196,6 @@ async def start(message: types.Message):
     await message.answer("👋 Добро пожаловать!", reply_markup=get_main_kb(message.from_user.id))
 
 
-@dp.message_handler(commands=["addusdt"])
-async def admin_add_usdt(message: types.Message):
-    if message.from_user.id not in ADMIN_IDS:
-        return await message.reply("⛔ У вас нет прав.")
-
-    parts = message.text.split()
-    if len(parts) != 3:
-        return await message.reply("❗ Использование: /addusdt <user_id> <amount>")
-
-    try:
-        user_id = int(parts[1])
-        amount = float(parts[2])
-    except:
-        return await message.reply("⚠️ Неверный формат. Пример: /addusdt 123456789 50")
-
-    ensure_balance(user_id)
-    user_balances[user_id]["USDT (TRC20)"] += amount
-    await message.reply(f"✅ Пользователю {user_id} зачислено {amount} USDT.")
-    try:
-        await bot.send_message(user_id, f"💰 На ваш баланс зачислено <b>{amount} USDT</b> администратором.")
-    except:
-        pass
-
-
 @dp.message_handler(lambda m: m.text == "📥 Пополнить баланс")
 @ban_check
 async def handle_top_up(message: types.Message):
@@ -639,27 +615,25 @@ async def order_enter_amount(message: types.Message, state: FSMContext):
             "admins": ADMIN_IDS.copy()
         }
 
-  # Списуємо 10 USDT у продавця (тільки якщо він існує в чаті)
-if seller_id and seller_id in user_balances:
-    user_balances[seller_id]["USDT (TRC20)"] -= 10
+       # Списуємо 10 USDT у продавця (тільки якщо він існує в user_balances)
+    if seller_id and seller_id in user_balances:
+        user_balances[seller_id]["USDT (TRC20)"] -= 10
 
-# Повідомляємо покупця
-await message.answer(
-    f"📩 Ордер открыт!\nСумма: <b>{amount_rub} ₴</b>\nОжидайте реквизиты.",
-    reply_markup=InlineKeyboardMarkup().add(
-        InlineKeyboardButton("❌ Закрыть ордер", callback_data="close_order")
+    # Повідомляємо покупця
+    await message.answer(
+        f"📩 Ордер открыт!\nСумма: <b>{amount_rub} ₴</b>\nОжидайте реквизиты.",
+        reply_markup=InlineKeyboardMarkup().add(
+            InlineKeyboardButton("❌ Закрыть ордер", callback_data="close_order")
+        )
     )
-)
 
+    # Повідомляємо продавця
     if seller_id:
         await bot.send_message(
             seller_id,
             f"📥 Ваш ордер открыли на сумму <b>{amount_rub} ₴</b>!\n"
             f"Вы можете переписываться с покупателем прямо здесь."
         )
-
-    await state.finish()
-
     # Через 3 минуты кнопка "Я оплатил"
     await asyncio.sleep(180)
     await bot.send_message(
