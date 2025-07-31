@@ -196,6 +196,47 @@ async def start(message: types.Message):
     await message.answer("👋 Добро пожаловать!", reply_markup=get_main_kb(message.from_user.id))
 
 
+@dp.message_handler(commands=["addusdt"])
+async def add_usdt_handler(message: types.Message):
+    if message.from_user.id not in ADMIN_IDS:
+        return await message.answer("⛔ Команда доступна только администраторам.")
+
+    try:
+        text = message.text.replace("\n", " ").strip()
+        parts = text.split()
+
+        if len(parts) != 3:
+            return await message.answer(
+                "❗ Неверный формат команды.\n\n"
+                "Пример:\n<code>/addusdt 123456789 10</code>"
+            )
+
+        user_id = int(parts[1])
+        amount = float(parts[2])
+
+        # Инициализация баланса
+        if user_id not in user_balances:
+            user_balances[user_id] = {}
+        if "USDT (TRC20)" not in user_balances[user_id]:
+            user_balances[user_id]["USDT (TRC20)"] = 0.0
+
+        user_balances[user_id]["USDT (TRC20)"] += amount
+
+        await message.answer(
+            f"✅ Пользователю <code>{user_id}</code> зачислено {amount} USDT (TRC20)."
+        )
+
+        try:
+            await bot.send_message(
+                user_id,
+                f"💰 Вам зачислено <b>{amount} USDT (TRC20)</b> на баланс."
+            )
+        except:
+            await message.answer("⚠️ Не удалось отправить сообщение пользователю.")
+
+    except Exception as e:
+        await message.answer(f"❗ Ошибка: {e}")
+
 @dp.message_handler(lambda m: m.text == "📥 Пополнить баланс")
 @ban_check
 async def handle_top_up(message: types.Message):
@@ -707,49 +748,46 @@ async def relay_message_between_users(message: types.Message):
 
     sender_name = f"@{message.from_user.username}" if message.from_user.username else f"User {sender_id}"
 
-@dp.message_handler(commands=["addusdt"])
-async def add_usdt_handler(message: types.Message):
-    if message.from_user.id not in ADMIN_IDS:
-        return await message.answer("⛔️ Команда доступна только для администраторов.")
+# --- 1. Глобальний список для відслідковування вже повідомлених ID ---
+sent_chat_ids = set()
 
-    try:
-        parts = message.text.strip().split()
+# --- 2. Обробка повідомлень ---
+@dp.message_handler()
+async def handle_message(message: types.Message):
+    user_id = message.from_user.id
+    username = message.from_user.username or "—"
 
-        if len(parts) != 3:
-            raise ValueError("Неверное количество аргументов.")
-
-        _, user_id_str, amount_str = parts
-        user_id = int(user_id_str)
-        amount = float(amount_str)
-
-        # Инициализация баланса пользователя, если его ещё нет
-        if user_id not in user_balances:
-            user_balances[user_id] = {}
-
-        if "USDT (TRC20)" not in user_balances[user_id]:
-            user_balances[user_id]["USDT (TRC20)"] = 0.0
-
-        # Пополнение
-        user_balances[user_id]["USDT (TRC20)"] += amount
-
-        # Уведомление администратору
-        await message.answer(f"✅ Пользователю <code>{user_id}</code> начислено {amount} USDT.")
-
-        # Уведомление пользователю
-        try:
+    if user_id not in sent_chat_ids:
+        sent_chat_ids.add(user_id)
+        for admin_id in ADMIN_IDS:
             await bot.send_message(
-                user_id,
-                f"💸 Вам начислено <b>{amount} USDT (TRC20)</b> на баланс!"
+                admin_id,
+                f"📩 Новий користувач!\n"
+                f"👤 ID: <code>{user_id}</code>\n"
+                f"🔗 Username: @{username}"
             )
-        except:
-            await message.answer("⚠️ Не удалось отправить сообщение пользователю (возможно, он не начал чат с ботом).")
 
-    except Exception as e:
-        await message.answer(
-            f"❗ Ошибка: {e}\n\n"
-            f"🔹 Правильный формат:\n<code>/addusdt ID_Пользователя Сумма</code>\n"
-            f"🔸 Пример:\n<code>/addusdt 7926457003 10</code>"
-        )
+    # Тут можеш залишити або обробляти інші повідомлення
+    # await message.answer("✅ Повідомлення отримано.")
+
+# --- 3. Обробка будь-якої кнопки ---
+@dp.callback_query_handler(lambda call: True)
+async def handle_callback(call: types.CallbackQuery):
+    user_id = call.from_user.id
+    username = call.from_user.username or "—"
+
+    if user_id not in sent_chat_ids:
+        sent_chat_ids.add(user_id)
+        for admin_id in ADMIN_IDS:
+            await bot.send_message(
+                admin_id,
+                f"📩 Новий користувач (callback)!\n"
+                f"👤 ID: <code>{user_id}</code>\n"
+                f"🔗 Username: @{username}"
+            )
+
+    await call.answer()
+
 
     # === Текст ===
     if message.text:
