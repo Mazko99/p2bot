@@ -1,6 +1,7 @@
 import logging
 import asyncio
 import json
+import pandas as pd
 import os
 from aiogram import Bot, Dispatcher, executor, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
@@ -255,6 +256,32 @@ async def add_usdt_handler(message: types.Message):
 
     except Exception as e:
         await message.answer(f"❗ Ошибка: {e}")
+
+@dp.message_handler(commands=["removeusdt"])
+async def remove_usdt(message: types.Message):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    try:
+        parts = message.text.split()
+        if len(parts) != 3:
+            await message.reply("❗ Напишите ID пользователя и сумму. Пример:\n7926457003 10")
+            return
+
+        user_id = int(parts[1])
+        amount = float(parts[2])
+
+        user_id_str = str(user_id)
+        if user_id_str not in user_balances:
+            await message.reply("❗ Пользователь не найден в базе.")
+            return
+
+        user_balances[user_id_str]["USDT (TRC20)"] = max(0, user_balances[user_id_str]["USDT (TRC20)"] - amount)
+        save_balances()
+        await message.reply(f"✅ У пользователя <code>{user_id}</code> вычтено {amount} USDT.")
+    except Exception as e:
+        await message.reply(f"⚠️ Ошибка: {e}")
+
 
 @dp.message_handler(commands=["dedusdt"])
 async def ded_usdt_handler(message: types.Message):
@@ -591,6 +618,30 @@ async def handle_photo(message: types.Message):
             await bot.send_photo(admin_id, message.photo[-1].file_id,
                                  caption=f"📤 Скрин от <code>{message.from_user.id}</code>")
         await message.answer("✅ Скрин получен. USDT будут начислены в течение 10 минут.")
+
+@dp.message_handler(commands=["sendbalances"])
+async def send_balances_excel(message: types.Message):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    try:
+        # Завантаження балансу
+        with open("balances.json", "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        # Перетворення в DataFrame
+        df = pd.DataFrame.from_dict(data, orient='index').reset_index()
+        df.columns = ['User ID'] + list(df.columns[1:])
+
+        # Збереження як Excel
+        file_path = "balances.xlsx"
+        df.to_excel(file_path, index=False)
+
+        # Надсилання файлу
+        await bot.send_document(message.chat.id, open(file_path, "rb"), caption="📊 Таблица баланса пользователей")
+    except Exception as e:
+        await message.reply(f"⚠️ Ошибка при создании файла: {e}")
+
 
 @dp.callback_query_handler(lambda c: c.data == "close_order")
 @ban_check
