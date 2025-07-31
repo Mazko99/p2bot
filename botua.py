@@ -62,7 +62,7 @@ user_ads["sell"] = [
 user_ads["buy"] = [
     ad("@CryptoBoss",   43.1, "500 – 2000 грн", banks("Monobank", "PrivatBank", "PUMB", "A-Bank", "Sense Bank"), t="buy"),
     ad("@UkrTrader",    43.6, "500 – 2000 грн", banks("Monobank", "Sense Bank", "Ukrsibbank", "Concord Bank"), t="buy"),
-    ad("@BestRate24",   43.78, "500 – 2000 грн", banks("PrivatBank", "PUMB", "OTP Bank", "Oschadbank", "Raiffeisen"), t="buy"),
+    ad("@BestRate24",   41.78, "500 – 2000 грн", banks("PrivatBank", "PUMB", "OTP Bank", "Oschadbank", "Raiffeisen"), t="buy"),
     ad("@FastUSDT",     43.48, "500 – 2000 грн", banks("Monobank", "PUMB", "MTB Bank", "Globus Bank"), t="buy"),
     ad("@TrustExchanger",43.29, "500 – 2000 грн", banks("Raiffeisen", "Sense Bank", "PrivatBank", "Ukrsibbank", "Oschadbank"), t="buy"),
     ad("@VerifedPro",   43.76, "500 – 2000 грн", banks("Monobank", "PrivatBank", "A-Bank", "Credit Agricole"), t="buy"),
@@ -73,7 +73,7 @@ user_ads["buy"] = [
     ad("@ExchangePlus", 43.15, "2000 – 6000 грн", banks("Monobank", "PrivatBank", "PUMB", "Oschadbank", "Ukrsibbank"), t="buy"),
     ad("@BitProfi",     43.38, "2000 – 6000 грн", banks("Monobank", "PrivatBank", "PUMB", "Oschadbank", "OTP Bank", "Credit Agricole"), t="buy"),
     ad("@FiatBridge",   43.40, "2000 – 6000 грн", banks("Monobank", "PrivatBank", "Sense Bank", "Ukrsibbank"), t="buy"),
-    ad("@DigitalGate",  43.51, "2000 – 6000 грн", banks("PrivatBank", "PUMB", "Raiffeisen", "Sense Bank", "Oschadbank"), t="buy"),
+    ad("@DigitalGate",  41.89, "2000 – 6000 грн", banks("PrivatBank", "PUMB", "Raiffeisen", "Sense Bank", "Oschadbank"), t="buy"),
     ad("@FastMoney",    43.29, "2000 – 6000 грн", banks("Monobank", "PrivatBank", "PUMB", "Raiffeisen", "Sense Bank"), t="buy"),
     ad("@TokenExpress", 42.26, "2000 – 6000 грн", banks("PrivatBank", "PUMB", "Oschadbank", "Ukrsibbank", "Concord Bank", "Globus Bank"), t="buy"),
     ad("@FixRate",      42.33, "2000 – 6000 грн", banks("Monobank", "PrivatBank", "PUMB", "A-Bank", "Sense Bank", "OTP Bank"), t="buy"),
@@ -94,11 +94,13 @@ active_orders = {}
 
 
 wallets = {
-    "USDT (TRC20)": "TASaXLcvBHcjH6QrP14JxeiBcw5DU2aDGo", 
-    "BTC": "bc1qcq9x2peyweq9tm2sfmr7xsxsu6v3s6w2l6vmk5",
-    "ETH": "0x4bB25f73c01AEFcA7A9eD4a7Bc7dD1EAeCA27acF",
-    "BNB": "0x4bB25f73c01AEFcA7A9eD4a7Bc7dD1EAeCA27acF",
-    "TRX": "TASaXLcvBHcjH6QrP14JxeiBcw5DU2aDGo"
+    "USDT (TRC20)": "TQz9gQCkYpARgjhZ3LkgvjBPXP3CbHLs4j",
+    "USDT (TON)":
+"UQDrzrCu7PcyQYxkREgk6sUfkVk2kvox8PwE63ZE6EupBljy",
+    "BTC": "13tERrpTrtWP42ehZKBZ4qcN9ESE4UCXUS",
+    "ETH (ERC20)": "0xef2adf5e2e761a3b64846ac46ae1f10e400dc652",
+    "BNB (BEP20)": "0xef2adf5e2e761a3b64846ac46ae1f10e400dc652",
+    "TRX": "TQz9gQCkYpARgjhZ3LkgvjBPXP3CbHLs4j"
 }
 
 ADMIN_IDS = {5138418509}  # ← заміни на свій Telegram ID
