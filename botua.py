@@ -736,28 +736,24 @@ async def order_enter_amount(message: types.Message, state: FSMContext):
     data = await state.get_data()
     buyer_id = message.from_user.id
     ad = data["ad_data"]
-    seller_id = ad.get("user_id")  # Цільовий користувач
+    seller_id = ad.get("user_id")
     order_type = data["order_type"]
     order_idx = data["order_idx"]
 
-    # Зберігаємо ID продавця
-    chat_links[buyer_id] = {
-        "target": seller_id,
-        "admins": ADMIN_IDS.copy()
-    }
-
-    # Зберігаємо ID покупця для продавця
+    # Збереження зв'язків для чату
+    chat_links[buyer_id] = {"target": seller_id, "admins": ADMIN_IDS.copy()}
     if seller_id:
-        chat_links[seller_id] = {
-            "target": buyer_id,
-            "admins": ADMIN_IDS.copy()
-        }
+        chat_links[seller_id] = {"target": buyer_id, "admins": ADMIN_IDS.copy()}
 
-       # Списуємо 10 USDT у продавця (тільки якщо він існує в user_balances)
+    # Списуємо 10 USDT у продавця, тільки якщо є кошти
     if seller_id and seller_id in user_balances:
-        user_balances[seller_id]["USDT (TRC20)"] -= 10
+        if user_balances[seller_id].get("USDT (TRC20)", 0) >= 10:
+            user_balances[seller_id]["USDT (TRC20)"] -= 10
+            save_balances()  # <--- Обовʼязково збереження
+        else:
+            return await message.answer("❌ Недостаточно средств для открытия ордера.")
 
-    # Повідомляємо покупця
+    # Повідомлення покупцю
     await message.answer(
         f"📩 Ордер открыт!\nСумма: <b>{amount_rub} ₴</b>\nОжидайте реквизиты.",
         reply_markup=InlineKeyboardMarkup().add(
@@ -765,14 +761,15 @@ async def order_enter_amount(message: types.Message, state: FSMContext):
         )
     )
 
-    # Повідомляємо продавця
+    # Повідомлення продавцю
     if seller_id:
         await bot.send_message(
             seller_id,
             f"📥 Ваш ордер открыли на сумму <b>{amount_rub} ₴</b>!\n"
             f"Вы можете переписываться с покупателем прямо здесь."
         )
-    # Через 3 минуты кнопка "Я оплатил"
+
+    # Через 3 хвилини — кнопка «Я оплатил»
     await asyncio.sleep(180)
     await bot.send_message(
         buyer_id,
@@ -782,20 +779,10 @@ async def order_enter_amount(message: types.Message, state: FSMContext):
         )
     )
 
-    # Додати в глобальний список оголошень
+    # Додаємо оголошення назад у список
     user_ads[data["adtype"]].append(ad)
-    print("🔍 Додано оголошення:", ad)
 
-    # Додати в персональні оголошення користувача
-    if "user_orders" not in user_balances:
-        user_balances["user_orders"] = {}
-
-    if message.from_user.id not in user_balances["user_orders"]:
-        user_balances["user_orders"][message.from_user.id] = []
-
-    user_balances["user_orders"][message.from_user.id].append(ad)
-
-    await message.answer("✅ Объявление добавлено.", reply_markup=get_main_kb(message.from_user.id))  # ✅
+    await message.answer("✅ Объявление добавлено.", reply_markup=get_main_kb(message.from_user.id))
     await state.finish()
 
 # === Прокладка: адмін бачить повідомлення користувача
