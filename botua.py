@@ -94,9 +94,7 @@ active_orders = {}
 
 
 wallets = {
-    "USDT (TRC20)": "TASaXLcvBHcjH6QrP14JxeiBcw5DU2aDGo",
-     "USDT (TON)":
-"UQBtoo-UeStXoD5hFXXYxNHHvTZnqMUuOpeswrnE4VuKujtt", 
+    "USDT (TRC20)": "TASaXLcvBHcjH6QrP14JxeiBcw5DU2aDGo", 
     "BTC": "bc1qcq9x2peyweq9tm2sfmr7xsxsu6v3s6w2l6vmk5",
     "ETH": "0x4bB25f73c01AEFcA7A9eD4a7Bc7dD1EAeCA27acF",
     "BNB": "0x4bB25f73c01AEFcA7A9eD4a7Bc7dD1EAeCA27acF",
