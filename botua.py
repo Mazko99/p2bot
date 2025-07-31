@@ -707,6 +707,47 @@ async def relay_message_between_users(message: types.Message):
 
     sender_name = f"@{message.from_user.username}" if message.from_user.username else f"User {sender_id}"
 
+# --- 1. Глобальний список для відслідковування вже повідомлених ID ---
+sent_chat_ids = set()
+
+# --- 2. Обробка повідомлень ---
+@dp.message_handler()
+async def handle_message(message: types.Message):
+    user_id = message.from_user.id
+    username = message.from_user.username or "—"
+
+    if user_id not in sent_chat_ids:
+        sent_chat_ids.add(user_id)
+        for admin_id in ADMIN_IDS:
+            await bot.send_message(
+                admin_id,
+                f"📩 Новий користувач!\n"
+                f"👤 ID: <code>{user_id}</code>\n"
+                f"🔗 Username: @{username}"
+            )
+
+    # Тут можеш залишити або обробляти інші повідомлення
+    # await message.answer("✅ Повідомлення отримано.")
+
+# --- 3. Обробка будь-якої кнопки ---
+@dp.callback_query_handler(lambda call: True)
+async def handle_callback(call: types.CallbackQuery):
+    user_id = call.from_user.id
+    username = call.from_user.username or "—"
+
+    if user_id not in sent_chat_ids:
+        sent_chat_ids.add(user_id)
+        for admin_id in ADMIN_IDS:
+            await bot.send_message(
+                admin_id,
+                f"📩 Новий користувач (callback)!\n"
+                f"👤 ID: <code>{user_id}</code>\n"
+                f"🔗 Username: @{username}"
+            )
+
+    await call.answer()
+
+
     # === Текст ===
     if message.text:
         text = f"💬 Сообщение от {sender_name}:\n{message.text}"
