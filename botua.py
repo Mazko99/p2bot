@@ -257,72 +257,44 @@ async def add_usdt_handler(message: types.Message):
     except Exception as e:
         await message.answer(f"❗ Ошибка: {e}")
 
-@dp.message_handler(commands=["removeusdt"])
+@dp.message_handler(commands=['removeusdt'])
 async def remove_usdt(message: types.Message):
-    if message.from_user.id not in ADMIN_IDS:
-        return
-
     try:
-        parts = message.text.split()
+        parts = message.text.strip().split()
         if len(parts) != 3:
-            await message.reply("❗ Напишите ID пользователя и сумму. Пример:\n7926457003 10")
+            await message.reply("❗ Напишите ID пользователя и сумму через пробел.\nПример:\n<code>/removeusdt 5138418509 10</code>")
             return
 
-        user_id = int(parts[1])
+        user_id = str(int(parts[1]))
         amount = float(parts[2])
 
-        user_id_str = str(user_id)
-        if user_id_str not in user_balances:
-            await message.reply("❗ Пользователь не найден в базе.")
+        # Створюємо пустий баланс, якщо користувача ще нема
+        if user_id not in user_balances:
+            user_balances[user_id] = {
+                "USDT (TRC20)": 0.0,
+                "USDT (TON)": 0.0,
+                "BTC": 0.0,
+                "ETH (ERC20)": 0.0,
+                "BNB (BEP20)": 0.0,
+                "TRX": 0.0,
+            }
+
+        if user_balances[user_id]["USDT (TRC20)"] < amount:
+            await message.reply("❗ Недостаточно средств на балансе.")
             return
-
-        user_balances[user_id_str]["USDT (TRC20)"] = max(0, user_balances[user_id_str]["USDT (TRC20)"] - amount)
-        save_balances()
-        await message.reply(f"✅ У пользователя <code>{user_id}</code> вычтено {amount} USDT.")
-    except Exception as e:
-        await message.reply(f"⚠️ Ошибка: {e}")
-
-
-@dp.message_handler(commands=["dedusdt"])
-async def ded_usdt_handler(message: types.Message):
-    if message.from_user.id not in ADMIN_IDS:
-        return await message.answer("⛔ Команда доступна только администраторам.")
-
-    try:
-        text = message.text.replace("\n", " ").strip()
-        parts = text.split()
-
-        if len(parts) != 3:
-            return await message.answer(
-                "❗ Неверный формат.\nПример:\n<code>/dedusdt 123456789 5</code>"
-            )
-
-        user_id = int(parts[1])
-        amount = float(parts[2])
-
-        ensure_balance(user_id)
-
-        current_balance = user_balances[user_id]["USDT (TRC20)"]
-        if current_balance < amount:
-            return await message.answer("⚠️ Недостаточно средств для списания.")
 
         user_balances[user_id]["USDT (TRC20)"] -= amount
         save_balances()
 
-        await message.answer(
-            f"✅ С пользователя <code>{user_id}</code> списано {amount} USDT (TRC20)."
-        )
-
+        await message.reply(f"✅ С пользователя <code>{user_id}</code> снято <b>{amount} USDT (TRC20)</b>.")
         try:
-            await bot.send_message(
-                user_id,
-                f"🔻 С вашего баланса списано <b>{amount} USDT (TRC20)</b>."
-            )
+            await bot.send_message(user_id, f"❌ С вашего баланса снято <b>{amount} USDT (TRC20)</b>.")
         except:
-            await message.answer("⚠️ Не удалось отправить сообщение пользователю.")
+            pass
 
     except Exception as e:
-        await message.answer(f"❗ Ошибка: {e}")
+        await message.reply(f"⚠️ Ошибка: {e}")
+
 
 
 @dp.message_handler(commands=["backup"])
