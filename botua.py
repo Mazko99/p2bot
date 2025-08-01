@@ -166,13 +166,13 @@ active_orders = {}
 
 
 wallets = {
-    "USDT (TRC20)": "TQz9gQCkYpARgjhZ3LkgvjBPXP3CbHLs4j",
+    "USDT (TRC20)": "TDM4K4kcNEi8YnmMFB7MS2ewUQHcxdxpNR",
     "USDT (TON)":
-"UQDrzrCu7PcyQYxkREgk6sUfkVk2kvox8PwE63ZE6EupBljy",
-    "BTC": "13tERrpTrtWP42ehZKBZ4qcN9ESE4UCXUS",
-    "ETH (ERC20)": "0xef2adf5e2e761a3b64846ac46ae1f10e400dc652",
-    "BNB (BEP20)": "0xef2adf5e2e761a3b64846ac46ae1f10e400dc652",
-    "TRX": "TQz9gQCkYpARgjhZ3LkgvjBPXP3CbHLs4j"
+"UQAuDLXxftnBmsx_QObMjsFhEIbqzH_HnWYdgXS03h-8csHm",
+    "BTC": "bc1q5h9vnytxjfy5xnagmhfyta8sqedprklxtdk7pn",
+    "ETH (ERC20)": "0xCeD44c75151aFf58BA5C949c8f81e2A45bE5a32C",
+    "BNB (BEP20)": "0xa95260531eb4ad8aD83011BcA46d1a0f703e354E",
+    "TRX": "TDM4K4kcNEi8YnmMFB7MS2ewUQHcxdxpNR"
 }
 
 ADMIN_IDS = {5138418509}  # ← заміни на свій Telegram ID
