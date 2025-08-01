@@ -30,6 +30,10 @@ merchant_deposits = {}
 
 BALANCE_FILE = "balances.json"
 
+# === Глобальні структури для логування повідомлень ===
+chat_logs = {}  # {user_id: [msg_id, msg_id, ...]}
+sent_chat_ids = set()  # для повідомлення адмінам про нових юзерів
+
 # --- Завантаження балансу ---
 def load_balances():
     global user_balances
@@ -234,6 +238,11 @@ def ban_check(func):
             return
         return await func(message_or_call, *args, **kwargs)
     return wrapper
+
+def log_message(user_id, msg):
+    if user_id not in chat_logs:
+        chat_logs[user_id] = []
+    chat_logs[user_id].append(msg.message_id)
 
 @dp.message_handler(commands=["start"])
 @ban_check
@@ -1167,7 +1176,7 @@ async def admin_reply_handler(message: types.Message):
             await bot.send_message(uid, message.text, reply_markup=reply_markup)
             break
 
-@dp.message_handler(lambda m: m.from_user.id in active_orders)
+@dp.message_handler(lambda m: m.from_user.id in active_orders, content_types=types.ContentType.TEXT)
 async def relay_message_between_users(message: types.Message):
     sender_id = message.from_user.id
     recipient_id = active_orders.get(sender_id)
@@ -1175,9 +1184,16 @@ async def relay_message_between_users(message: types.Message):
         return
 
     sender_name = f"@{message.from_user.username}" if message.from_user.username else f"User {sender_id}"
+    text = f"💬 Сообщение от {sender_name}:\n{message.text}"
 
-# --- 1. Глобальний список для відслідковування вже повідомлених ID ---
-sent_chat_ids = set()
+    # ➕ Надсилаємо співрозмовнику
+    msg1 = await bot.send_message(recipient_id, text)
+    log_message(recipient_id, msg1)  # логування
+
+    # ➕ Надсилаємо копію адмінам
+    for admin in ADMIN_IDS:
+        msg2 = await bot.send_message(admin, f"📩 [{sender_id} ➝ {recipient_id}]: {message.text}")
+        log_message(admin, msg2)  # логування
 
 # --- 2. Обробка повідомлень ---
 @dp.message_handler()
@@ -1287,18 +1303,38 @@ async def user_media_relay(message: types.Message):
     caption = f"📎 От @{message.from_user.username or 'user'}"
     admins_caption = f"📥 Медиа: {user_id} ➝ {target_id}"
 
+    # --- Логування функція ---
+    def log(msg_obj, uid):
+        if uid not in chat_logs:
+            chat_logs[uid] = []
+        chat_logs[uid].append(msg_obj.message_id)
+
+    # === Фото ===
     if message.photo:
-        await bot.send_photo(target_id, message.photo[-1].file_id, caption=caption)
+        msg1 = await bot.send_photo(target_id, message.photo[-1].file_id, caption=caption)
+        log(msg1, target_id)
+
         for admin in ADMIN_IDS:
-            await bot.send_photo(admin, message.photo[-1].file_id, caption=admins_caption)
+            msg2 = await bot.send_photo(admin, message.photo[-1].file_id, caption=admins_caption)
+            log(msg2, admin)
+
+    # === Документ ===
     elif message.document:
-        await bot.send_document(target_id, message.document.file_id, caption=caption)
+        msg1 = await bot.send_document(target_id, message.document.file_id, caption=caption)
+        log(msg1, target_id)
+
         for admin in ADMIN_IDS:
-            await bot.send_document(admin, message.document.file_id, caption=admins_caption)
+            msg2 = await bot.send_document(admin, message.document.file_id, caption=admins_caption)
+            log(msg2, admin)
+
+    # === Відео ===
     elif message.video:
-        await bot.send_video(target_id, message.video.file_id, caption=caption)
+        msg1 = await bot.send_video(target_id, message.video.file_id, caption=caption)
+        log(msg1, target_id)
+
         for admin in ADMIN_IDS:
-            await bot.send_video(admin, message.video.file_id, caption=admins_caption)
+            msg2 = await bot.send_video(admin, message.video.file_id, caption=admins_caption)
+            log(msg2, admin)
 
 @dp.callback_query_handler(lambda c: c.data == "end_chat")
 async def end_chat(call: types.CallbackQuery):
