@@ -239,7 +239,13 @@ def ban_check(func):
 @ban_check
 async def start(message: types.Message):
     ensure_balance(message.from_user.id)
-    await message.answer("👋 Добро пожаловать!", reply_markup=get_main_kb(message.from_user.id))
+    
+    # 🟡 Відправка повідомлення
+    msg = await message.answer("👋 Добро пожаловать!", reply_markup=get_main_kb(message.from_user.id))
+
+    # ✅ КРОК 1: Зберігаємо message_id
+    user_id = message.from_user.id
+    chat_links.setdefault(user_id, {}).setdefault("msgs", []).append(msg.message_id)
 
 
 @dp.message_handler(commands=["addusdt"])
@@ -264,15 +270,22 @@ async def add_usdt_handler(message: types.Message):
         user_balances[user_id]["USDT (TRC20)"] += amount
         save_balances()
 
-        await message.answer(
+        confirm_msg = await message.answer(
             f"✅ Пользователю <code>{user_id}</code> зачислено {amount} USDT (TRC20)."
         )
 
+        # ✅ КРОК 1: Зберігаємо ID цього повідомлення
+        chat_links.setdefault(message.from_user.id, {}).setdefault("msgs", []).append(confirm_msg.message_id)
+
         try:
-            await bot.send_message(
+            user_msg = await bot.send_message(
                 user_id,
                 f"💰 Вам зачислено <b>{amount} USDT (TRC20)</b> на баланс."
             )
+
+            # ✅ КРОК 2: Зберігаємо повідомлення, яке пішло користувачу
+            chat_links.setdefault(user_id, {}).setdefault("msgs", []).append(user_msg.message_id)
+
         except:
             await message.answer("⚠️ Не удалось отправить сообщение пользователю.")
 
@@ -284,7 +297,11 @@ async def remove_usdt(message: types.Message):
     try:
         parts = message.text.strip().split()
         if len(parts) != 3:
-            await message.reply("❗ Напишите ID пользователя и сумму через пробел.\nПример:\n<code>/removeusdt 5138418509 10</code>")
+            reply_msg = await message.reply(
+                "❗ Напишите ID пользователя и сумму через пробел.\n"
+                "Пример:\n<code>/removeusdt 5138418509 10</code>"
+            )
+            chat_links.setdefault(message.from_user.id, {}).setdefault("msgs", []).append(reply_msg.message_id)
             return
 
         user_id = str(int(parts[1]))
@@ -302,61 +319,107 @@ async def remove_usdt(message: types.Message):
             }
 
         if user_balances[user_id]["USDT (TRC20)"] < amount:
-            await message.reply("❗ Недостаточно средств на балансе.")
+            warn_msg = await message.reply("❗ Недостаточно средств на балансе.")
+            chat_links.setdefault(message.from_user.id, {}).setdefault("msgs", []).append(warn_msg.message_id)
             return
 
         user_balances[user_id]["USDT (TRC20)"] -= amount
         save_balances()
 
-        await message.reply(f"✅ С пользователя <code>{user_id}</code> снято <b>{amount} USDT (TRC20)</b>.")
+        success_msg = await message.reply(
+            f"✅ С пользователя <code>{user_id}</code> снято <b>{amount} USDT (TRC20)</b>."
+        )
+        chat_links.setdefault(message.from_user.id, {}).setdefault("msgs", []).append(success_msg.message_id)
+
         try:
-            await bot.send_message(user_id, f"❌ С вашего баланса снято <b>{amount} USDT (TRC20)</b>.")
+            notify_msg = await bot.send_message(
+                int(user_id),
+                f"❌ С вашего баланса снято <b>{amount} USDT (TRC20)</b>."
+            )
+            chat_links.setdefault(int(user_id), {}).setdefault("msgs", []).append(notify_msg.message_id)
         except:
             pass
 
     except Exception as e:
-        await message.reply(f"⚠️ Ошибка: {e}")
-
+        error_msg = await message.reply(f"⚠️ Ошибка: {e}")
+        chat_links.setdefault(message.from_user.id, {}).setdefault("msgs", []).append(error_msg.message_id)
 
 
 @dp.message_handler(commands=["backup"])
 async def send_backup_file(message: types.Message):
     if message.from_user.id not in ADMIN_IDS:
-        return await message.answer("⛔ Команда доступна только администраторам.")
+        warn = await message.answer("⛔ Команда доступна только администраторам.")
+        chat_links.setdefault(message.from_user.id, {}).setdefault("msgs", []).append(warn.message_id)
+        return
 
     try:
         with open(BALANCE_FILE, "rb") as f:
-            await bot.send_document(message.chat.id, f, caption="📂 Резервная копия баланса")
+            sent = await bot.send_document(message.chat.id, f, caption="📂 Резервная копия баланса")
+            chat_links.setdefault(message.from_user.id, {}).setdefault("msgs", []).append(sent.message_id)
     except FileNotFoundError:
-        await message.answer("⚠️ Файл баланса ещё не создан.")
-
+        err = await message.answer("⚠️ Файл баланса ещё не создан.")
+        chat_links.setdefault(message.from_user.id, {}).setdefault("msgs", []).append(err.message_id)
 
 
 @dp.message_handler(lambda m: m.text == "📥 Пополнить баланс")
 @ban_check
 async def handle_top_up(message: types.Message):
-    await message.answer(
+    txt = (
         f"💳 Отправьте USDT на адрес ниже:\n\n{get_wallets_text()}\n\n"
         f"⚠️ Мин. сумма пополнения — <b>{MIN_TOPUP}$</b>.\n"
-        f"После оплаты нажмите кнопку ниже.",
+        f"После оплаты нажмите кнопку ниже."
+    )
+    msg = await message.answer(
+        txt,
         reply_markup=InlineKeyboardMarkup().add(
             InlineKeyboardButton("✅ Я оплатил", callback_data="topup_done")
         )
     )
 
+    # 💬 Зберігаємо message_id для подальшої очистки або історії
+    chat_links.setdefault(message.from_user.id, {}).setdefault("msgs", []).append(msg.message_id)
+
 @dp.callback_query_handler(lambda c: c.data == "topup_done")
 async def confirm_topup(call: types.CallbackQuery):
+    user_id = call.from_user.id
+
+    # Відповідь користувачу
     await call.message.answer("⌛ Спасибо! Средства будут зачислены в течение 10 минут.")
+
+    # Додавання логування повідомлення (опціонально)
+    chat_links.setdefault(user_id, {}).setdefault("msgs", []).append(call.message.message_id)
+
+    # Сповіщення адміну (опційно)
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.send_message(
+                admin_id,
+                f"📩 Пользователь <code>{user_id}</code> нажал «Я оплатил».\n"
+                f"Проверьте пополнение и вручную зачислите средства через /addusdt."
+            )
+        except:
+            pass
 
 @dp.callback_query_handler(lambda c: c.data == "pledge_sent")
 async def pledge_confirmation(call: types.CallbackQuery):
-    await call.message.answer("⌛ Спасибо!\nОжидайте от 10 до 30 минут — администрация проверит ваш залог и откроет доступ к публикации.")
+    user_id = call.from_user.id
+
+    # Відповідь користувачу
+    await call.message.answer(
+        "⌛ Спасибо!\n"
+        "Ожидайте от 10 до 30 минут — администрация проверит ваш залог и откроет доступ к публикации."
+    )
+
+    # Сповіщення всім адміністраторам
     for admin_id in ADMIN_IDS:
-        await bot.send_message(
-            admin_id,
-            f"🔔 Пользователь <code>{call.from_user.id}</code> нажал 'Я внес залог'.\n"
-            f"Проверьте поступление и подтвердите вручную."
-        )
+        try:
+            await bot.send_message(
+                admin_id,
+                f"🔔 Пользователь <code>{user_id}</code> нажал <b>«Я внес залог»</b>.\n"
+                f"Проверьте поступление и подтвердите вручную."
+            )
+        except:
+            pass
 
 @dp.callback_query_handler(lambda c: c.data == "payment_received")
 async def payment_received(call: types.CallbackQuery):
@@ -482,6 +545,31 @@ async def handle_sell(message: types.Message):
         return await message.answer("❌ Недостаточно средств на балансе.")
     await message.answer("💸 Выберите диапазон:", reply_markup=get_range_kb("sell"))
 
+@dp.message_handler(commands=["clear_chat"], commands_prefix="/", user_id=ADMIN_IDS)
+async def admin_clear_chat(message: types.Message):
+    args = message.text.strip().split()
+    if len(args) < 2:
+        return await message.answer("⚠️ Введите команду в формате:\n<code>/clear_chat USER_ID</code>")
+
+    try:
+        target_id = int(args[1])
+
+        msgs = chat_links.get(target_id, {}).get("msgs", [])
+        deleted_count = 0
+
+        for msg_id in msgs:
+            try:
+                await bot.delete_message(chat_id=target_id, message_id=msg_id)
+                deleted_count += 1
+            except Exception as e:
+                continue  # игнорируем ошибки при удалении
+
+        await message.answer(f"🧹 Удалено сообщений: {deleted_count} из чата <code>{target_id}</code>")
+        chat_links[target_id]["msgs"] = []
+
+    except Exception as e:
+        await message.answer(f"❌ Ошибка: {e}")
+
 @dp.message_handler(lambda m: m.text == "🗨️ Чаты")
 async def admin_chat_list(message: types.Message):
     if message.from_user.id not in ADMIN_IDS:
@@ -581,7 +669,6 @@ async def open_order(call: types.CallbackQuery, state: FSMContext):
     buyer_id = call.from_user.id
     seller_username = ad["username"]
 
-    # Ініціалізуємо чат покупця
     if buyer_id not in chat_links:
         chat_links[buyer_id] = {}
     chat_links[buyer_id]["with"] = seller_username
@@ -605,10 +692,12 @@ async def open_order(call: types.CallbackQuery, state: FSMContext):
             buyer_id=buyer_id
         )
 
-        await bot.send_message(
+        msg = await bot.send_message(
             seller_id,
             f"📩 Ваше объявление открыто!\nСумма по объявлению: {ad['limit']} ₴"
         )
+        log_message(seller_id, msg)
+
     else:
         await state.update_data(
             order_type=otype,
@@ -617,22 +706,25 @@ async def open_order(call: types.CallbackQuery, state: FSMContext):
             buyer_id=buyer_id
         )
 
-    # === Якщо це ПРОДАЖ — продавець має ввести реквізити
+    # === ПРОДАЖ — реквізити
     if otype == "sell":
         seller_id = int(ad["username"].replace("User_", "")) if ad["username"].startswith("User_") else None
 
         if seller_id and user_balances.get(seller_id, {}).get("USDT (TRC20)", 0) < 12:
-            await call.message.answer("❌ Недостаточно средств на балансе для открытия ордера. Минимум: 12 USDT.")
+            msg = await call.message.answer("❌ Недостаточно средств на балансе для открытия ордера. Минимум: 12 USDT.")
+            log_message(buyer_id, msg)
             return
 
         await state.update_data(waiting_payment_details=True)
 
-        await call.message.answer("✍️ Укажите реквизиты для оплаты (номер карты, банк и т.д.):")
+        msg = await call.message.answer("✍️ Укажите реквизиты для оплаты (номер карты, банк и т.д.):")
+        log_message(buyer_id, msg)
         return
 
-    # === Якщо це ПОКУПКА — питаємо суму в покупця
+    # === ПОКУПКА — питаємо суму
     await OrderForm.amount_rub.set()
-    await call.message.answer("💰 Введите сумму в UAH, которую хотите обменять:")
+    msg = await call.message.answer("💰 Введите сумму в UAH, которую хотите обменять:")
+    log_message(buyer_id, msg)
 
     # Видаляємо старі повідомлення
     if buyer_id in chat_links:
@@ -646,53 +738,65 @@ async def open_order(call: types.CallbackQuery, state: FSMContext):
     chat_links[buyer_id] = {"admins": ADMIN_IDS.copy()}
 
     for admin_id in ADMIN_IDS:
-        await bot.send_message(
+        msg = await bot.send_message(
             admin_id,
             f"📥 Новый ордер ({otype.upper()})\n"
             f"Пользователь: <code>{buyer_id}</code>\n"
             f"Ожидается сообщение для передачи реквизитов."
         )
+        log_message(admin_id, msg)
 
-    await call.message.answer(
+    msg = await call.message.answer(
         "💬 Ордер открыт. Вы можете переписываться здесь.\n\n"
         "Когда закончите — нажмите кнопку ниже.",
         reply_markup=InlineKeyboardMarkup().add(
             InlineKeyboardButton("❌ Завершить диалог", callback_data="end_chat")
         )
     )
+    log_message(buyer_id, msg)
 
-    # Затримка 3 хвилини і поява кнопки "Я оплатил"
+    # Затримка 3 хв
     await asyncio.sleep(180)
 
     if chat_links.get(buyer_id, {}).get("confirm_sent"):
         return
     chat_links[buyer_id]["confirm_sent"] = True
 
-    await bot.send_message(
+    msg = await bot.send_message(
         buyer_id,
         "Если вы произвели оплату, нажмите ниже:",
         reply_markup=InlineKeyboardMarkup().add(
             InlineKeyboardButton("✅ Я оплатил", callback_data=f"confirm:{otype}:{idx}")
         )
     )
+    log_message(buyer_id, msg)
 
 @dp.callback_query_handler(lambda c: c.data.startswith("confirm:"))
 async def confirm_payment(call: types.CallbackQuery):
     await call.answer()
-    
-    # Додаємо користувача до списку очікування скріншота
-    await_screenshot.add(call.from_user.id)  # <-- без await, просто .add()
 
-    await call.message.answer("📸 Отправьте, пожалуйста, скриншот оплаты.")
+    # Додаємо користувача до списку очікування скріншота
+    await_screenshot.add(call.from_user.id)
+
+    msg = await call.message.answer("📸 Отправьте, пожалуйста, скриншот оплаты.")
+    log_message(call.from_user.id, msg)
 
 @dp.message_handler(content_types=types.ContentType.PHOTO)
 async def handle_photo(message: types.Message):
     if message.from_user.id in await_screenshot:
         await_screenshot.remove(message.from_user.id)
+
         for admin_id in ADMIN_IDS:
-            await bot.send_photo(admin_id, message.photo[-1].file_id,
-                                 caption=f"📤 Скрин от <code>{message.from_user.id}</code>")
-        await message.answer("✅ Скрин получен. USDT будут начислены в течение 10 минут.")
+            msg = await bot.send_photo(
+                admin_id,
+                message.photo[-1].file_id,
+                caption=f"📤 Скрин от <code>{message.from_user.id}</code>"
+            )
+            log_message(admin_id, msg)
+
+        msg = await message.answer("✅ Скрин получен. USDT будут начислены в течение 10 минут.")
+        log_message(message.from_user.id, msg)
+
 
 @dp.message_handler(commands=["sendbalances"])
 async def send_balances_excel(message: types.Message):
@@ -713,9 +817,12 @@ async def send_balances_excel(message: types.Message):
         df.to_excel(file_path, index=False)
 
         # Надсилання файлу
-        await bot.send_document(message.chat.id, open(file_path, "rb"), caption="📊 Таблица баланса пользователей")
+        doc_msg = await bot.send_document(message.chat.id, open(file_path, "rb"), caption="📊 Таблица баланса пользователей")
+        log_message(message.from_user.id, doc_msg)
+
     except Exception as e:
-        await message.reply(f"⚠️ Ошибка при создании файла: {e}")
+        error_msg = await message.reply(f"⚠️ Ошибка при создании файла: {e}")
+        log_message(message.from_user.id, error_msg)
 
 
 
@@ -727,7 +834,8 @@ async def add_ad_start(message: types.Message):
         InlineKeyboardButton("🔴 Продажа", callback_data="adtype:sell"),
         InlineKeyboardButton("🟢 Покупка", callback_data="adtype:buy")
     )
-    await message.answer("🔄 Вы хотите купить или продать USDT?", reply_markup=kb)
+    msg = await message.answer("🔄 Вы хотите купить или продать USDT?", reply_markup=kb)
+    log_message(message.from_user.id, msg)
 
 @dp.callback_query_handler(lambda c: c.data.startswith("adtype:"))
 async def ad_choose_type(call: types.CallbackQuery, state: FSMContext):
@@ -737,7 +845,9 @@ async def ad_choose_type(call: types.CallbackQuery, state: FSMContext):
 
     # 🛑 Якщо це продаж — перевіряємо баланс
     if adtype == "sell" and user_balances[user_id]["USDT (TRC20)"] < 10:
-        return await call.message.answer("❌ Недостаточно средств для создания объявления о продаже. Минимум: 10 USDT.")
+        msg = await call.message.answer("❌ Недостаточно средств для создания объявления о продаже. Минимум: 10 USDT.")
+        log_message(user_id, msg)
+        return
 
     # 🛑 Перевірка застави
     pledge = merchant_deposits.get(user_id)
@@ -745,17 +855,20 @@ async def ad_choose_type(call: types.CallbackQuery, state: FSMContext):
         kb = InlineKeyboardMarkup().add(
             InlineKeyboardButton("✅ Я внес залог", callback_data="pledge_sent")
         )
-        return await call.message.answer(
+        msg = await call.message.answer(
             "🔒 Только верифицированные мерчанты могут размещать объявления.\n\n"
             "💰 Внесите залог от <b>200</b> до <b>500 USDT</b> на адрес:\n\n"
             "<code>TQz9gQCkYpARgjhZ3LkgvjBPXP3CbHLs4j</code>\n\n"
             "После оплаты нажмите кнопку ниже.",
             reply_markup=kb
         )
+        log_message(user_id, msg)
+        return
 
     await state.update_data(adtype=adtype)
     await AdForm.amount.set()
-    await call.message.answer("💵 Введите диапазон суммы (например: 500–2000 ₴):")
+    msg = await call.message.answer("💵 Введите диапазон суммы (например: 500–2000 ₴):")
+    log_message(user_id, msg)
 
 
 @dp.callback_query_handler(lambda c: c.data == "delmsg")
@@ -770,11 +883,16 @@ async def handle_delete_message(call: types.CallbackQuery):
 @dp.callback_query_handler(lambda c: c.data.startswith("adminchat:"))
 async def open_admin_chat(call: types.CallbackQuery):
     buyer_id = int(call.data.split(":")[1])
-    if buyer_id not in chat_links:
-        return await call.message.answer("❌ Чат не найден.")
+    admin_id = call.from_user.id
 
-    chat_links[call.from_user.id] = {"with": buyer_id, "is_admin": True}
-    await call.message.answer("💬 Вы подключены к чату. Напишите сообщение.")
+    if buyer_id not in chat_links:
+        msg = await call.message.answer("❌ Чат не найден.")
+        log_message(admin_id, msg)
+        return
+
+    chat_links[admin_id] = {"with": buyer_id, "is_admin": True}
+    msg = await call.message.answer("💬 Вы подключены к чату. Напишите сообщение.")
+    log_message(admin_id, msg)
 
 @dp.message_handler(state=AdForm.amount)
 @ban_check
@@ -795,7 +913,8 @@ async def ad_set_amount(message: types.Message, state: FSMContext):
 async def ad_set_rate(message: types.Message, state: FSMContext):
     await state.update_data(rate=message.text)
     await AdForm.banks.set()
-    await message.answer("🏦 Укажите банки через запятую (например: MonoBank,PrivatBank,ПУМБ):")
+    msg = await message.answer("🏦 Укажите банки через запятую (например: MonoBank,PrivatBank,ПУМБ):")
+    log_message(message.from_user.id, msg)
 
 @dp.message_handler(state=AdForm.banks)
 @ban_check
@@ -803,36 +922,42 @@ async def ad_finish(message: types.Message, state: FSMContext):
     await state.update_data(banks=[b.strip() for b in message.text.split(",")])
     data = await state.get_data()
 
+    user_id = message.from_user.id
     rate = float(data["rate"])
     ad_type = data["adtype"]
     limit_str = data["amount"]
 
-    # 🔒 Перевірка застави — тільки мерчанти можуть створювати оголошення
-    pledge = merchant_deposits.get(message.from_user.id)
+    # 🔒 Перевірка застави
+    pledge = merchant_deposits.get(user_id)
     if not pledge or pledge.get("amount", 0) < 200:
-        await message.answer(
+        msg = await message.answer(
             "⛔ Объявление может создать только проверенный мерчант, внесите залог от 200 до 500 USDT."
         )
+        log_message(user_id, msg)
         return
 
-    # --- Якщо це ПРОДАЖ — перевіряємо чи вистачає USDT на суму
+    # ✅ Якщо це ПРОДАЖ — перевіряємо баланс
     if ad_type == "sell":
         try:
             min_limit, _ = parse_limit(limit_str)
             required_usdt = round(min_limit / rate, 2)
 
-            current_usdt = user_balances.get(message.from_user.id, {}).get("USDT (TRC20)", 0)
+            current_usdt = user_balances.get(user_id, {}).get("USDT (TRC20)", 0)
             if current_usdt < required_usdt:
-                return await message.answer(
+                msg = await message.answer(
                     f"❌ Недостаточно USDT на балансе для создания объявления.\n"
                     f"Минимум нужно: <b>{required_usdt} USDT</b>, у вас: <b>{current_usdt} USDT</b>."
                 )
+                log_message(user_id, msg)
+                return
         except Exception as e:
-            return await message.answer(f"⚠️ Ошибка диапазона: {e}")
+            msg = await message.answer(f"⚠️ Ошибка диапазона: {e}")
+            log_message(user_id, msg)
+            return
 
-    # --- Створення оголошення
+    # === Створення оголошення
     ad = {
-        "username": f"User_{message.from_user.id}",
+        "username": f"User_{user_id}",
         "rate": rate,
         "limit": limit_str,
         "banks": data["banks"],
@@ -843,19 +968,18 @@ async def ad_finish(message: types.Message, state: FSMContext):
     print("=== AD TYPE ===", data["adtype"])
     print("=== AD OBJECT ===", ad)
 
-    # ✅ Додаємо в глобальний список
-    user_ads[data["adtype"]].append(ad)
+    # ➕ Додаємо в глобальний список
+    user_ads[ad_type].append(ad)
 
-    # ✅ Додаємо в особисті оголошення користувача
+    # ➕ Додаємо в особистий список
     if "user_orders" not in user_balances:
         user_balances["user_orders"] = {}
+    if user_id not in user_balances["user_orders"]:
+        user_balances["user_orders"][user_id] = []
+    user_balances["user_orders"][user_id].append(ad)
 
-    if message.from_user.id not in user_balances["user_orders"]:
-        user_balances["user_orders"][message.from_user.id] = []
-
-    user_balances["user_orders"][message.from_user.id].append(ad)
-
-    await message.answer("✅ Объявление добавлено.", reply_markup=get_main_kb(message.from_user.id))
+    msg = await message.answer("✅ Объявление добавлено.", reply_markup=get_main_kb(user_id))
+    log_message(user_id, msg)
     await state.finish()
 
 @dp.message_handler(commands=["confirm_pledge"])
@@ -889,7 +1013,9 @@ async def confirm_pledge(message: types.Message):
 async def order_enter_amount(message: types.Message, state: FSMContext):
     amount_rub = message.text.strip()
     if not amount_rub.replace(".", "").isdigit():
-        return await message.answer("⚠️ Введите число в ₴ (например: 1500).")
+        msg = await message.answer("⚠️ Введите число в ₴ (например: 1500).")
+        log_message(message.from_user.id, msg)
+        return
 
     amount_rub = float(amount_rub)
     data = await state.get_data()
@@ -900,71 +1026,78 @@ async def order_enter_amount(message: types.Message, state: FSMContext):
     order_type = data["order_type"]
     order_idx = data["order_idx"]
 
-    # === 1. Перевіряємо, чи входить введена сума в діапазон ===
+    # === Перевірка діапазону
     try:
         min_limit, max_limit = parse_limit(ad["limit"])
         if not (min_limit <= amount_rub <= max_limit):
-            return await message.answer(
+            msg = await message.answer(
                 f"❌ Сумма вне диапазона объявления ({min_limit} – {max_limit} ₴).\n"
                 f"Пожалуйста, введите сумму в пределах этого диапазона."
             )
+            log_message(buyer_id, msg)
+            return
     except:
-        return await message.answer("❌ Невозможно определить диапазон лимита объявления.")
+        msg = await message.answer("❌ Невозможно определить диапазон лимита объявления.")
+        log_message(buyer_id, msg)
+        return
 
-    # === 2. Якщо це ПРОДАЖ — перевіряємо баланс USDT у продавця ===
+    # === Якщо ПРОДАЖ — перевіряємо баланс продавця
     if order_type == "sell" and seller_id:
         usdt_balance = user_balances.get(seller_id, {}).get("USDT (TRC20)", 0)
         required_usdt = round(amount_rub / ad["rate"], 2)
 
         if usdt_balance < required_usdt:
-            return await message.answer(
+            msg = await message.answer(
                 f"❌ Недостаточно USDT на балансе для открытия ордера.\n"
                 f"Нужно: <b>{required_usdt} USDT</b>, есть: <b>{usdt_balance} USDT</b>"
             )
+            log_message(buyer_id, msg)
+            return
 
-        # списуємо з балансу
         user_balances[seller_id]["USDT (TRC20)"] -= required_usdt
         save_balances()
 
-    # === Зв'язок
+    # === Зв'язки
     chat_links[buyer_id] = {"target": seller_id, "admins": ADMIN_IDS.copy()}
     if seller_id:
         chat_links[seller_id] = {"target": buyer_id, "admins": ADMIN_IDS.copy()}
 
-    # ✅ Покупцю
-    await message.answer(
+    # ✅ Повідомлення покупцю
+    msg1 = await message.answer(
         f"📩 Ордер открыт!\nСумма: <b>{amount_rub} ₴</b>\nОжидайте реквизиты.",
         reply_markup=InlineKeyboardMarkup().add(
             InlineKeyboardButton("❌ Закрыть ордер", callback_data="close_order")
         )
     )
+    log_message(buyer_id, msg1)
 
-    # ✅ Продавцю
+    # ✅ Повідомлення продавцю
     if seller_id:
-        await bot.send_message(
+        msg2 = await bot.send_message(
             seller_id,
             f"📥 Ваш ордер открыли на сумму <b>{amount_rub} ₴</b>!\n"
             f"Вы можете переписываться с покупателем прямо здесь."
         )
+        log_message(seller_id, msg2)
 
-    # 🕒 Затримка 3 хвилини і показ кнопки "Я оплатил"
-    await asyncio.sleep(120)
+    # 🕒 Затримка 3 хвилини і поява кнопки
+    await asyncio.sleep(180)
 
     if chat_links.get(buyer_id, {}).get("confirm_button_sent"):
         return
 
     chat_links[buyer_id]["confirm_button_sent"] = True
 
-    await bot.send_message(
+    msg3 = await bot.send_message(
         buyer_id,
         "Если вы произвели оплату, нажмите ниже:",
         reply_markup=InlineKeyboardMarkup().add(
             InlineKeyboardButton("✅ Я оплатил", callback_data=f"confirm:{order_type}:{order_idx}")
         )
     )
+    log_message(buyer_id, msg3)
 
     await state.finish()
-
 
 
 @dp.message_handler(state="*", content_types=types.ContentType.TEXT)
@@ -973,20 +1106,28 @@ async def handle_payment_details(message: types.Message, state: FSMContext):
     if data.get("waiting_payment_details"):
         buyer_id = data.get("buyer_id")
         if not buyer_id:
-            return await message.answer("⚠️ Ошибка: ID покупателя не найден.")
+            msg = await message.answer("⚠️ Ошибка: ID покупателя не найден.")
+            log_message(message.from_user.id, msg)
+            return
 
-        await bot.send_message(buyer_id, f"💳 Реквизиты продавца:\n<code>{message.text}</code>")
-        await message.answer("✅ Реквизиты отправлены покупателю.")
+        # Надсилаємо реквізити покупцю
+        msg1 = await bot.send_message(buyer_id, f"💳 Реквизиты продавца:\n<code>{message.text}</code>")
+        log_message(buyer_id, msg1)
 
-        # Додати кнопку "Средства получены"
-        await message.answer("🟢 Когда получите оплату, нажмите кнопку ниже:",
+        # Підтвердження продавцю
+        msg2 = await message.answer("✅ Реквизиты отправлены покупателю.")
+        log_message(message.from_user.id, msg2)
+
+        # Кнопка "Средства получены"
+        msg3 = await message.answer(
+            "🟢 Когда получите оплату, нажмите кнопку ниже:",
             reply_markup=InlineKeyboardMarkup().add(
                 InlineKeyboardButton("✅ Средства получены", callback_data="payment_received")
             )
         )
+        log_message(message.from_user.id, msg3)
 
         await state.finish()
-
 
 # === Прокладка: адмін бачить повідомлення користувача
 @dp.message_handler(lambda m: m.from_user.id in ADMIN_IDS)
