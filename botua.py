@@ -987,8 +987,8 @@ async def end_chat(call: types.CallbackQuery):
 async def relay_messages(message: types.Message):
     sender_id = message.from_user.id
     if sender_id in active_orders:
-        recipient_id = active_orders[sender_id]
-        # Відправити текст або медіа
+        recipient_id = active_orders[SendGrid]
+        # Відправити текст або медіа   
         if message.content_type == "text":
             await bot.send_message(recipient_id, f"💬 {message.text}")
         elif message.content_type in ["photo", "document", "video", "voice"]:
