@@ -682,7 +682,6 @@ async def close_order(call: types.CallbackQuery, state: FSMContext):
     # Завершуємо стан
     await state.finish()
     await call.answer()
-
 @dp.callback_query_handler(lambda c: c.data.startswith("buy:") or c.data.startswith("sell:"))
 @ban_check
 async def show_filtered_ads(call: types.CallbackQuery):
@@ -706,34 +705,22 @@ async def show_filtered_ads(call: types.CallbackQuery):
 
     msg_ids = []
 
-    for i, ad in enumerate(filtered):
+    for display_idx, ad in enumerate(filtered):
         kb = InlineKeyboardMarkup().add(
-            InlineKeyboardButton(
-                "📩 Открыть ордер",
-                callback_data=f"open:{prefix}:{i}"
-            )
+            InlineKeyboardButton("📩 Открыть ордер", callback_data=f"open:{prefix}:{display_idx}")
         )
-
         if call.from_user.id in ADMIN_IDS:
-            kb.add(
-                InlineKeyboardButton(
-                    "🗑 Удалить (админом)",
-                    callback_data=f"admin_del:{prefix}:{i}"
-                )
-            )
+            kb.add(InlineKeyboardButton("🗑 Удалить (админом)", callback_data=f"admin_del:{prefix}:{display_idx}"))
 
-        msg = await call.message.answer(fmt_ad(ad, i), reply_markup=kb)
-        log_message(call.from_user.id, msg)              # ← логируем это сообщение
-        chat_links.setdefault(call.from_user.id, {}) \
-                  .setdefault("msgs", []).append(msg.message_id)
+        msg = await call.message.answer(fmt_ad(ad, display_idx), reply_markup=kb)
+        log_message(call.from_user.id, msg)
+        chat_links.setdefault(call.from_user.id, {}).setdefault("msgs", []).append(msg.message_id)
         msg_ids.append(msg.message_id)
 
-    # обновляем историю
-    if call.from_user.id not in chat_links:
-        chat_links[call.from_user.id] = {}
-
-    chat_links[call.from_user.id]["msgs"] = msg_ids
+    # тягнемо всі нові msg_id в існуючий список, не перезаписуючи його
+    chat_links.setdefault(call.from_user.id, {}).setdefault("msgs", []).extend(msg_ids)
     chat_links[call.from_user.id]["admins"] = ADMIN_IDS.copy()
+
 
 @dp.callback_query_handler(lambda c: c.data.startswith("open:"), state="*")
 @ban_check
