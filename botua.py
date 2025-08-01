@@ -82,6 +82,16 @@ user_ads["sell"] = [
     ad("@VerifiedX",    43.50, "6000 – 40000 грн", banks("Monobank", "PrivatBank", "PUMB", "Raiffeisen", "Sense Bank", "Ukrsibbank", "Concord Bank", "Globus Bank"), t="sell"),
     ad("@RateMaster",   43.40, "6000 – 40000 грн", banks("PrivatBank", "PUMB", "Oschadbank", "Ukrsibbank", "OTP Bank", "Credit Agricole"), t="sell"),
 ]
+# Проставляємо заставу для фейкових
+fake_usernames = [ad["username"] for ad in user_ads["sell"] + user_ads["buy"]]
+for name in fake_usernames:
+    if name.startswith("@"):
+        # Просто дамо їм 500/500 заставу
+        merchant_deposits[name] = {
+            "amount": 500,
+            "target": 500,
+            "verified": True
+        }
 
 user_ads["buy"] = [
     ad("@CryptoBoss",   43.1, "500 – 2000 грн", banks("Monobank", "PrivatBank", "PUMB", "A-Bank", "Sense Bank"), t="buy"),
@@ -168,12 +178,22 @@ def parse_limit(limit_str):
 
 
 def fmt_ad(ad, idx):
+    # Отримати ID продавця, якщо це User_<id>
+    pledge_str = "—"
+    if ad["username"].startswith("User_"):
+        uid = int(ad["username"].replace("User_", ""))
+        pledge_str = get_pledge_string(uid)
+    else:
+        # Фейкові — даємо кастомну заставу, наприклад 500/500
+        pledge_str = "500/500$"
+
     return (
         f"<b>#{idx+1} | {ad['type'].upper()}</b>\n"
         f"✅ Верифицировано • <code>{ad['username']}</code>\n"
         f"Курс: <b>{ad['rate']}</b> ₴\n"
         f"Объём: <b>{ad['limit']}</b>\n"
         f"Банки: <i>{', '.join(ad['banks'])}</i>\n"
+        f"Залог: <b>{pledge_str}</b>\n"
         f"Время оплаты: 15 мин\n"
         f"Условия: {ad.get('terms', '—')}"
     )
@@ -326,6 +346,16 @@ async def handle_top_up(message: types.Message):
 async def confirm_topup(call: types.CallbackQuery):
     await call.message.answer("⌛ Спасибо! Средства будут зачислены в течение 10 минут.")
 
+@dp.callback_query_handler(lambda c: c.data == "pledge_sent")
+async def pledge_confirmation(call: types.CallbackQuery):
+    await call.message.answer("⌛ Спасибо!\nОжидайте от 10 до 30 минут — администрация проверит ваш залог и откроет доступ к публикации.")
+    for admin_id in ADMIN_IDS:
+        await bot.send_message(
+            admin_id,
+            f"🔔 Пользователь <code>{call.from_user.id}</code> нажал 'Я внес залог'.\n"
+            f"Проверьте поступление и подтвердите вручную."
+        )
+
 @dp.callback_query_handler(lambda c: c.data == "payment_received")
 async def payment_received(call: types.CallbackQuery):
     await call.message.answer("✅ Ордер успешно исполнен.")
@@ -420,12 +450,15 @@ async def show_my_orders(message: types.Message):
     if not orders:
         return await message.answer("❌ У вас нет активных ордеров.")
 
+    pledge_str = get_pledge_string(user_id)
+
     for idx, ad in enumerate(orders):
         text = (
             f"<b>#{idx + 1}</b> | Тип: <b>{ad['type']}</b>\n"
-            f"Курс: {ad['rate']}₽\n"
+            f"Курс: {ad['rate']}₴\n"
             f"Объём: {ad['limit']}\n"
             f"Банки: {', '.join(ad['banks'])}\n"
+            f"Залог: <b>{pledge_str}</b>\n"
             f"Условия: {ad.get('terms', '—')}"
         )
         kb = InlineKeyboardMarkup().add(
@@ -523,7 +556,7 @@ if call.from_user.id not in chat_links:
 
 chat_links[call.from_user.id]["msgs"] = msg_ids
 chat_links[call.from_user.id]["admins"] = ADMIN_IDS.copy()
-    }
+
 from aiogram.dispatcher.filters.state import State, StatesGroup
 
 @dp.callback_query_handler(lambda c: c.data.startswith("open:"), state="*")
@@ -574,11 +607,18 @@ async def open_order(call: types.CallbackQuery, state: FSMContext):
         )
 
     # === Якщо це ПРОДАЖ — продавець має ввести реквізити ===
-    if otype == "sell":
+if otype == "sell":
     seller_id = int(ad["username"].replace("User_", "")) if ad["username"].startswith("User_") else None
 
+    # ⛔ Перевірка балансу продавця
     if seller_id and user_balances.get(seller_id, {}).get("USDT (TRC20)", 0) < 12:
         await call.message.answer("❌ Недостаточно средств на балансе для открытия ордера. Минимум: 12 USDT.")
+        return
+
+    # ⛔ Перевірка застави
+    pledge = merchant_deposits.get(seller_id)
+    if not pledge or pledge.get("amount", 0) < 200:
+        await call.message.answer("❌ Только верифицированные мерчанты с залогом могут открывать ордера.")
         return
 
     await state.update_data(
@@ -694,9 +734,24 @@ async def ad_choose_type(call: types.CallbackQuery, state: FSMContext):
     if adtype == "sell" and user_balances[user_id]["USDT (TRC20)"] < 10:
         return await call.message.answer("❌ Недостаточно средств для создания объявления о продаже. Минимум: 10 USDT.")
 
+    # 🛑 Перевірка застави
+    pledge = merchant_deposits.get(user_id)
+    if not pledge or pledge.get("amount", 0) < 200:
+        kb = InlineKeyboardMarkup().add(
+            InlineKeyboardButton("✅ Я внес залог", callback_data="pledge_sent")
+        )
+        return await call.message.answer(
+            "🔒 Только верифицированные мерчанты могут размещать объявления.\n\n"
+            "💰 Внесите залог от <b>200</b> до <b>500 USDT</b> на адрес:\n\n"
+            "<code>TQz9gQCkYpARgjhZ3LkgvjBPXP3CbHLs4j</code>\n\n"
+            "После оплаты нажмите кнопку ниже.",
+            reply_markup=kb
+        )
+
     await state.update_data(adtype=adtype)
     await AdForm.amount.set()
     await call.message.answer("💵 Введите диапазон суммы (например: 500–2000 ₴):")
+
 
 @dp.callback_query_handler(lambda c: c.data == "delmsg")
 async def handle_delete_message(call: types.CallbackQuery):
@@ -743,15 +798,34 @@ async def ad_finish(message: types.Message, state: FSMContext):
     await state.update_data(banks=[b.strip() for b in message.text.split(",")])
     data = await state.get_data()
 
-    ad = {
-        "username": f"User_{message.from_user.id}",
-        "rate": float(data["rate"]),
-        "limit": data["amount"],
-        "banks": data["banks"],
-        "terms": "Без дополнительных условий",
-        "type": data["adtype"]  # має бути 'buy' або 'sell'
-    }
+    rate = float(data["rate"])
+ad_type = data["adtype"]
+limit_str = data["amount"]
 
+# --- Якщо це ПРОДАЖ — перевіряємо чи вистачає USDT
+if ad_type == "sell":
+    try:
+        min_limit, _ = parse_limit(limit_str)
+        required_usdt = round(min_limit / rate, 2)
+
+        current_usdt = user_balances.get(message.from_user.id, {}).get("USDT (TRC20)", 0)
+        if current_usdt < required_usdt:
+            return await message.answer(
+                f"❌ Недостаточно USDT на балансе для создания объявления.\n"
+                f"Минимум нужно: <b>{required_usdt} USDT</b>, у вас: <b>{current_usdt} USDT</b>."
+            )
+    except Exception as e:
+        return await message.answer(f"⚠️ Ошибка диапазона: {e}")
+
+# --- створюємо оголошення
+ad = {
+    "username": f"User_{message.from_user.id}",
+    "rate": rate,
+    "limit": limit_str,
+    "banks": data["banks"],
+    "terms": "Без дополнительных условий",
+    "type": ad_type
+}
     print("=== AD TYPE ===", data["adtype"])
     print("=== AD OBJECT ===", ad)
 
@@ -770,6 +844,32 @@ async def ad_finish(message: types.Message, state: FSMContext):
     await message.answer("✅ Объявление добавлено.", reply_markup=get_main_kb(message.from_user.id))
     await state.finish()
 
+@dp.message_handler(commands=["confirm_pledge"])
+async def confirm_pledge(message: types.Message):
+    if message.from_user.id not in ADMIN_IDS:
+        return await message.reply("⛔ Команда доступна только администраторам.")
+
+    try:
+        parts = message.text.strip().split()
+        if len(parts) != 3:
+            return await message.reply("❗ Формат: /confirm_pledge <user_id> <сумма>")
+
+        user_id = int(parts[1])
+        amount = float(parts[2])
+
+        merchant_deposits[user_id] = {
+            "amount": amount,
+            "target": MERCHANT_TARGET,
+            "verified": True
+        }
+
+        save_merchant_deposits()
+
+        await message.reply(f"✅ Залог {amount} USDT подтверждён для пользователя {user_id}.")
+        await bot.send_message(user_id, "✅ Ваш залог подтверждён! Теперь вы можете размещать объявления.")
+    except Exception as e:
+        await message.reply(f"❗ Ошибка: {e}")
+
 
 @dp.message_handler(state=OrderForm.amount_rub)
 async def order_enter_amount(message: types.Message, state: FSMContext):
@@ -777,25 +877,47 @@ async def order_enter_amount(message: types.Message, state: FSMContext):
     if not amount_rub.replace(".", "").isdigit():
         return await message.answer("⚠️ Введите число в ₴ (например: 1500).")
 
+    amount_rub = float(amount_rub)
     data = await state.get_data()
-    buyer_id = message.from_user.id
+
     ad = data["ad_data"]
+    buyer_id = message.from_user.id
     seller_id = ad.get("user_id")
     order_type = data["order_type"]
     order_idx = data["order_idx"]
 
-    # Збереження зв'язків для чату
+    # === 1. Перевіряємо, чи входить введена сума в діапазон оголошення ===
+    try:
+        min_limit, max_limit = parse_limit(ad["limit"])
+        if not (min_limit <= amount_rub <= max_limit):
+            return await message.answer(
+                f"❌ Сумма вне диапазона объявления ({min_limit} – {max_limit} ₴).\n"
+                f"Пожалуйста, введите сумму в пределах этого диапазона."
+            )
+    except:
+        return await message.answer("❌ Невозможно определить диапазон лимита объявления.")
+
+    # === 2. Якщо це ПРОДАЖ — перевіряємо, чи є достатньо USDT на суму ===
+    if order_type == "sell":
+        seller_id = int(ad["username"].replace("User_", "")) if ad["username"].startswith("User_") else None
+        if seller_id:
+            usdt_balance = user_balances.get(seller_id, {}).get("USDT (TRC20)", 0)
+            required_usdt = round(amount_rub / ad["rate"], 2)
+
+            if usdt_balance < required_usdt:
+                return await message.answer(
+                    f"❌ Недостаточно USDT на балансе для открытия ордера.\n"
+                    f"Необходимо как минимум <b>{required_usdt} USDT</b> (текущий баланс: {usdt_balance} USDT)"
+                )
+
+            # списуємо з балансу
+            user_balances[seller_id]["USDT (TRC20)"] -= required_usdt
+            save_balances()
+
+    # === Зв'язок між юзерами
     chat_links[buyer_id] = {"target": seller_id, "admins": ADMIN_IDS.copy()}
     if seller_id:
         chat_links[seller_id] = {"target": buyer_id, "admins": ADMIN_IDS.copy()}
-
-    # Списуємо 10 USDT у продавця, тільки якщо є кошти
-    if seller_id and seller_id in user_balances:
-        if user_balances[seller_id].get("USDT (TRC20)", 0) >= 10:
-            user_balances[seller_id]["USDT (TRC20)"] -= 10
-            save_balances()  # <--- Обовʼязково збереження
-        else:
-            return await message.answer("❌ Недостаточно средств для открытия ордера.")
 
     # Повідомлення покупцю
     await message.answer(
@@ -823,11 +945,10 @@ async def order_enter_amount(message: types.Message, state: FSMContext):
         )
     )
 
-    # Додаємо оголошення назад у список
     user_ads[data["adtype"]].append(ad)
-
     await message.answer("✅ Объявление добавлено.", reply_markup=get_main_kb(message.from_user.id))
     await state.finish()
+
 
 @dp.message_handler(state="*", content_types=types.ContentType.TEXT)
 async def handle_payment_details(message: types.Message, state: FSMContext):
