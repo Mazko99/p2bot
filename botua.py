@@ -799,36 +799,36 @@ async def ad_finish(message: types.Message, state: FSMContext):
     data = await state.get_data()
 
     rate = float(data["rate"])
-ad_type = data["adtype"]
-limit_str = data["amount"]
+    ad_type = data["adtype"]
+    limit_str = data["amount"]
 
-# --- Якщо це ПРОДАЖ — перевіряємо чи вистачає USDT
-if ad_type == "sell":
-    try:
-        min_limit, _ = parse_limit(limit_str)
-        required_usdt = round(min_limit / rate, 2)
+    # --- Якщо це ПРОДАЖ — перевіряємо чи вистачає USDT
+    if ad_type == "sell":
+        try:
+            min_limit, _ = parse_limit(limit_str)
+            required_usdt = round(min_limit / rate, 2)
 
-        current_usdt = user_balances.get(message.from_user.id, {}).get("USDT (TRC20)", 0)
-        if current_usdt < required_usdt:
-            return await message.answer(
-                f"❌ Недостаточно USDT на балансе для создания объявления.\n"
-                f"Минимум нужно: <b>{required_usdt} USDT</b>, у вас: <b>{current_usdt} USDT</b>."
-            )
-    except Exception as e:
-        return await message.answer(f"⚠️ Ошибка диапазона: {e}")
+            current_usdt = user_balances.get(message.from_user.id, {}).get("USDT (TRC20)", 0)
+            if current_usdt < required_usdt:
+                return await message.answer(
+                    f"❌ Недостаточно USDT на балансе для создания объявления.\n"
+                    f"Минимум нужно: <b>{required_usdt} USDT</b>, у вас: <b>{current_usdt} USDT</b>."
+                )
+        except Exception as e:
+            return await message.answer(f"⚠️ Ошибка диапазона: {e}")
 
-# --- створюємо оголошення
-ad = {
-    "username": f"User_{message.from_user.id}",
-    "rate": rate,
-    "limit": limit_str,
-    "banks": data["banks"],
-    "terms": "Без дополнительных условий",
-    "type": ad_type
-}
+    # --- створюємо оголошення
+    ad = {
+        "username": f"User_{message.from_user.id}",
+        "rate": rate,
+        "limit": limit_str,
+        "banks": data["banks"],
+        "terms": "Без дополнительных условий",
+        "type": ad_type
+    }
 
-print("=== AD TYPE ===", data["adtype"])
-print("=== AD OBJECT ===", ad)
+    print("=== AD TYPE ===", data["adtype"])
+    print("=== AD OBJECT ===", ad)
 
     # ✅ Додаємо в глобальний список
     user_ads[data["adtype"]].append(ad)
