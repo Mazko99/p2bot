@@ -5,10 +5,30 @@ import pandas as pd
 import os
 from aiogram import Bot, Dispatcher, executor, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
+
 from aiogram.dispatcher import FSMContext
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.dispatcher.filters.state import State, StatesGroup
-from aiogram.dispatcher import FSMContext
+
+# ❌ Цей імпорт ти повторив двічі — видали зайвий:
+# from aiogram.dispatcher import FSMContext
+
+# ✅ Middleware для автоматичного логування повідомлень
+from aiogram.dispatcher.middlewares import BaseMiddleware
+
+# === Глобальна змінна для зберігання повідомлень ===
+chat_links = {}
+
+class MessageLoggerMiddleware(BaseMiddleware):
+    async def on_post_process_message(self, message, results, data):
+        if message:
+            user_id = message.from_user.id
+            chat_links.setdefault(user_id, {}).setdefault("msgs", []).append(message.message_id)
+
+    async def on_post_process_callback_query(self, callback, results, data):
+        if callback and callback.message:
+            user_id = callback.from_user.id
+            chat_links.setdefault(user_id, {}).setdefault("msgs", []).append(callback.message.message_id)
 
 
 API_TOKEN = "7079057857:AAEtlYk_l1eTczU8_a9LU4tVD1lVmpwdAOE"
@@ -18,7 +38,13 @@ MIN_TOPUP = 10
 
 bot = Bot(token=API_TOKEN, parse_mode="HTML")
 dp = Dispatcher(bot, storage=MemoryStorage())
+
+# ✅ Підключення middleware
+dp.middleware.setup(MessageLoggerMiddleware())
+
+# ✅ Логування
 logging.basicConfig(level=logging.INFO)
+
 
 user_balances = {}
 chat_logs = {}  # user_id: [msg_id, msg_id, ...]
