@@ -326,6 +326,25 @@ async def handle_top_up(message: types.Message):
 async def confirm_topup(call: types.CallbackQuery):
     await call.message.answer("⌛ Спасибо! Средства будут зачислены в течение 10 минут.")
 
+@dp.callback_query_handler(lambda c: c.data == "payment_received")
+async def payment_received(call: types.CallbackQuery):
+    await call.message.answer("✅ Ордер успешно исполнен.")
+    await call.message.answer("❌ Диалог закрыт.", reply_markup=get_main_kb(call.from_user.id))
+
+    target_username = chat_links.get(call.from_user.id, {}).get("with")
+    target_id = None
+    for uid, data in chat_links.items():
+        if data.get("ad", {}).get("username") == target_username:
+            target_id = uid
+            break
+
+    if target_id:
+        await bot.send_message(target_id, "✅ Ордер завершен продавцом.")
+        chat_links.pop(target_id, None)
+
+    chat_links.pop(call.from_user.id, None)
+
+
 @dp.callback_query_handler(lambda c: c.data.startswith("admin_del:"))
 async def admin_delete_ad(call: types.CallbackQuery):
     if call.from_user.id not in ADMIN_IDS:
@@ -453,6 +472,21 @@ async def admin_chat_list(message: types.Message):
         )
         await message.answer(text, reply_markup=kb)
 
+@dp.callback_query_handler(lambda c: c.data == "close_order")
+@ban_check
+async def close_order(call: types.CallbackQuery):
+    try:
+        await bot.delete_message(call.message.chat.id, call.message.message_id)
+        await call.message.answer("✅ Ордер закрыт.", reply_markup=get_main_kb(call.from_user.id))  # ✅
+    except:
+        await call.message.answer("⚠️ Не удалось закрыть ордер.")
+
+    # 💬 Очистка активного чату
+    user_id = call.from_user.id
+    pair_id = active_orders.pop(user_id, None)
+    if pair_id:
+        active_orders.pop(pair_id, None
+
 @dp.callback_query_handler(lambda c: c.data.startswith("buy:") or c.data.startswith("sell:"))
 @ban_check
 async def show_filtered_ads(call: types.CallbackQuery):
@@ -505,13 +539,11 @@ async def open_order(call: types.CallbackQuery, state: FSMContext):
     chat_links[buyer_id]["with"] = seller_username
     chat_links[buyer_id]["ad"] = ad
 
-    # Якщо продавець зареєстрований як User_123456
     if seller_username.startswith("User_"):
         seller_id = int(seller_username.replace("User_", ""))
         active_orders[buyer_id] = seller_id
         active_orders[seller_id] = buyer_id
 
-        # Ініціалізуємо чат продавця
         chat_links[seller_id] = {
             "with": buyer_id,
             "ad": ad
@@ -521,25 +553,34 @@ async def open_order(call: types.CallbackQuery, state: FSMContext):
             order_type=otype,
             order_idx=idx,
             target_user=seller_id,
-            ad_data=ad
+            ad_data=ad,
+            buyer_id=buyer_id
         )
 
-        amount_text = f"Сума, яку хоче обміняти покупець: {ad['limit']} ₴"
-        await bot.send_message(seller_id, f"📩 Ваше оголошення відкрито!\n{amount_text}")
+        await bot.send_message(
+            seller_id,
+            f"📩 Ваше объявление открыто!\nСумма по объявлению: {ad['limit']} ₴"
+        )
 
     else:
         await state.update_data(
             order_type=otype,
             order_idx=idx,
-            ad_data=ad
+            ad_data=ad,
+            buyer_id=buyer_id
         )
 
-    # Питаємо покупця суму
+    # === Якщо це ПРОДАЖ — продавець має ввести реквізити ===
+    if otype == "sell":
+        await state.update_data(waiting_payment_details=True)
+        await call.message.answer("✍️ Укажите реквизиты для оплаты (номер карты, банк и т.д.):")
+        return
+
+    # === Якщо це ПОКУПКА — питаємо суму в покупця ===
     await OrderForm.amount_rub.set()
     await call.message.answer("💰 Введите сумму в UAH, которую хотите обменять:")
 
-
-    # Видаляємо попередні повідомлення з оголошеннями
+    # Видаляємо старі повідомлення
     if buyer_id in chat_links:
         for msg_id in chat_links[buyer_id].get("msgs", []):
             if msg_id != call.message.message_id:
@@ -550,7 +591,6 @@ async def open_order(call: types.CallbackQuery, state: FSMContext):
 
     chat_links[buyer_id] = {"admins": ADMIN_IDS.copy()}
 
-    # повідомити адміна
     for admin_id in ADMIN_IDS:
         await bot.send_message(
             admin_id,
@@ -560,13 +600,12 @@ async def open_order(call: types.CallbackQuery, state: FSMContext):
         )
 
     await call.message.answer(
-    "💬 Ордер открыт. Вы можете переписываться здесь.\n\n"
-    "Когда закончите — нажмите кнопку ниже.",
-    reply_markup=InlineKeyboardMarkup().add(
-        InlineKeyboardButton("❌ Завершить диалог", callback_data="end_chat")
+        "💬 Ордер открыт. Вы можете переписываться здесь.\n\n"
+        "Когда закончите — нажмите кнопку ниже.",
+        reply_markup=InlineKeyboardMarkup().add(
+            InlineKeyboardButton("❌ Завершить диалог", callback_data="end_chat")
+        )
     )
-)
-
 
     await asyncio.sleep(180)
     await bot.send_message(
@@ -582,7 +621,7 @@ async def confirm_payment(call: types.CallbackQuery):
     await call.answer()
     
     # Додаємо користувача до списку очікування скріншота
-    await_screenshot_users.add(call.from_user.id)  # <-- без await, просто .add()
+    await_screenshot.add(call.from_user.id)  # <-- без await, просто .add()
 
     await call.message.answer("📸 Отправьте, пожалуйста, скриншот оплаты.")
 
@@ -619,20 +658,6 @@ async def send_balances_excel(message: types.Message):
         await message.reply(f"⚠️ Ошибка при создании файла: {e}")
 
 
-@dp.callback_query_handler(lambda c: c.data == "close_order")
-@ban_check
-async def close_order(call: types.CallbackQuery):
-    try:
-        await bot.delete_message(call.message.chat.id, call.message.message_id)
-        await call.message.answer("✅ Ордер закрыт.", reply_markup=get_main_kb(call.from_user.id))  # ✅
-    except:
-        await call.message.answer("⚠️ Не удалось закрыть ордер.")
-
-    # 💬 Очистка активного чату
-    user_id = call.from_user.id
-    pair_id = active_orders.pop(user_id, None)
-    if pair_id:
-        active_orders.pop(pair_id, None)
 
 @dp.message_handler(lambda m: m.text == "➕ Добавить объявление")
 @ban_check
@@ -788,6 +813,27 @@ async def order_enter_amount(message: types.Message, state: FSMContext):
 
     await message.answer("✅ Объявление добавлено.", reply_markup=get_main_kb(message.from_user.id))
     await state.finish()
+
+@dp.message_handler(state="*", content_types=types.ContentType.TEXT)
+async def handle_payment_details(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    if data.get("waiting_payment_details"):
+        buyer_id = data.get("buyer_id")
+        if not buyer_id:
+            return await message.answer("⚠️ Ошибка: ID покупателя не найден.")
+
+        await bot.send_message(buyer_id, f"💳 Реквизиты продавца:\n<code>{message.text}</code>")
+        await message.answer("✅ Реквизиты отправлены покупателю.")
+
+        # Додати кнопку "Средства получены"
+        await message.answer("🟢 Когда получите оплату, нажмите кнопку ниже:",
+            reply_markup=InlineKeyboardMarkup().add(
+                InlineKeyboardButton("✅ Средства получены", callback_data="payment_received")
+            )
+        )
+
+        await state.finish()
+
 
 # === Прокладка: адмін бачить повідомлення користувача
 @dp.message_handler(lambda m: m.from_user.id in ADMIN_IDS)
