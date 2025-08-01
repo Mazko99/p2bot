@@ -826,8 +826,9 @@ ad = {
     "terms": "Без дополнительных условий",
     "type": ad_type
 }
-    print("=== AD TYPE ===", data["adtype"])
-    print("=== AD OBJECT ===", ad)
+
+print("=== AD TYPE ===", data["adtype"])
+print("=== AD OBJECT ===", ad)
 
     # ✅ Додаємо в глобальний список
     user_ads[data["adtype"]].append(ad)
