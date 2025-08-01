@@ -607,29 +607,29 @@ async def open_order(call: types.CallbackQuery, state: FSMContext):
         )
 
     # === Якщо це ПРОДАЖ — продавець має ввести реквізити ===
-if otype == "sell":
-    seller_id = int(ad["username"].replace("User_", "")) if ad["username"].startswith("User_") else None
+    if otype == "sell":
+        seller_id = int(ad["username"].replace("User_", "")) if ad["username"].startswith("User_") else None
 
-    # ⛔ Перевірка балансу продавця
-    if seller_id and user_balances.get(seller_id, {}).get("USDT (TRC20)", 0) < 12:
-        await call.message.answer("❌ Недостаточно средств на балансе для открытия ордера. Минимум: 12 USDT.")
+        # ⛔ Перевірка балансу продавця
+        if seller_id and user_balances.get(seller_id, {}).get("USDT (TRC20)", 0) < 12:
+            await call.message.answer("❌ Недостаточно средств на балансе для открытия ордера. Минимум: 12 USDT.")
+            return
+
+        # ⛔ Перевірка застави
+        pledge = merchant_deposits.get(seller_id)
+        if not pledge or pledge.get("amount", 0) < 200:
+            await call.message.answer("❌ Только верифицированные мерчанты с залогом могут открывать ордера.")
+            return
+
+        await state.update_data(
+            order_type=otype,
+            order_idx=idx,
+            ad_data=ad,
+            buyer_id=buyer_id,
+            waiting_payment_details=True
+        )
+        await call.message.answer("✍️ Укажите реквизиты для оплаты (номер карты, банк и т.д.):")
         return
-
-    # ⛔ Перевірка застави
-    pledge = merchant_deposits.get(seller_id)
-    if not pledge or pledge.get("amount", 0) < 200:
-        await call.message.answer("❌ Только верифицированные мерчанты с залогом могут открывать ордера.")
-        return
-
-    await state.update_data(
-        order_type=otype,
-        order_idx=idx,
-        ad_data=ad,
-        buyer_id=buyer_id,
-        waiting_payment_details=True
-    )
-    await call.message.answer("✍️ Укажите реквизиты для оплаты (номер карты, банк и т.д.):")
-    return
 
     # === Якщо це ПОКУПКА — питаємо суму в покупця ===
     await OrderForm.amount_rub.set()
