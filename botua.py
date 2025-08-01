@@ -25,6 +25,8 @@ banned_users = set()
 user_ads = {"buy": [], "sell": []}
 def banks(*names):
     return list(names)
+merchant_deposits = {}
+
 
 BALANCE_FILE = "balances.json"
 
@@ -540,24 +542,25 @@ async def show_filtered_ads(call: types.CallbackQuery):
         return await call.message.answer("🔍 Объявлений не найдено.")
 
     msg_ids = []
+
     for i, ad in enumerate(filtered):
         kb = InlineKeyboardMarkup().add(
             InlineKeyboardButton("📩 Открыть ордер", callback_data=f"open:{prefix}:{i}")
         )
+
         if call.from_user.id in ADMIN_IDS:
             kb.add(InlineKeyboardButton("🗑 Удалить (админом)", callback_data=f"admin_del:{prefix}:{i}"))
 
         msg = await call.message.answer(fmt_ad(ad, i), reply_markup=kb)
-msg_ids.append(msg.message_id)
+        msg_ids.append(msg.message_id)
 
-# додати або оновити chat_links[uid]
-if call.from_user.id not in chat_links:
-    chat_links[call.from_user.id] = {}
+    # додати або оновити chat_links[uid]
+    if call.from_user.id not in chat_links:
+        chat_links[call.from_user.id] = {}
 
-chat_links[call.from_user.id]["msgs"] = msg_ids
-chat_links[call.from_user.id]["admins"] = ADMIN_IDS.copy()
+    chat_links[call.from_user.id]["msgs"] = msg_ids
+    chat_links[call.from_user.id]["admins"] = ADMIN_IDS.copy()
 
-from aiogram.dispatcher.filters.state import State, StatesGroup
 
 @dp.callback_query_handler(lambda c: c.data.startswith("open:"), state="*")
 @ban_check
@@ -597,7 +600,6 @@ async def open_order(call: types.CallbackQuery, state: FSMContext):
             seller_id,
             f"📩 Ваше объявление открыто!\nСумма по объявлению: {ad['limit']} ₴"
         )
-
     else:
         await state.update_data(
             order_type=otype,
@@ -622,10 +624,6 @@ async def open_order(call: types.CallbackQuery, state: FSMContext):
             return
 
         await state.update_data(
-            order_type=otype,
-            order_idx=idx,
-            ad_data=ad,
-            buyer_id=buyer_id,
             waiting_payment_details=True
         )
         await call.message.answer("✍️ Укажите реквизиты для оплаты (номер карты, банк и т.д.):")
