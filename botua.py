@@ -408,8 +408,6 @@ async def handle_top_up(message: types.Message):
         f"⚠️ Мин. сумма пополнения — <b>{MIN_TOPUP}$</b>.\n"
         f"После оплаты нажмите кнопку ниже."
     )
-    chat_links.setdefault(message.from_user.id, {}).setdefault("msgs", []).append(msg.message_id)
-
     msg = await message.answer(
         txt,
         reply_markup=InlineKeyboardMarkup().add(
@@ -529,7 +527,8 @@ async def wallet_view(message: types.Message):
     txt = "👛 Ваш баланс:\n"
     for k, v in bal.items():
         txt += f"• {k}: <b>{v:.2f}</b>\n"
-    await message.answer(txt)
+    msg = await message.answer(txt)
+    chat_links.setdefault(message.from_user.id, {}).setdefault("msgs", []).append(msg.message_id)
 
 @dp.message_handler(lambda m: m.text == "🔻 Вывести USDT")
 async def handle_withdraw(message: types.Message):
@@ -537,21 +536,28 @@ async def handle_withdraw(message: types.Message):
     usdt_balance = user_balances[message.from_user.id]["USDT (TRC20)"]
 
     if usdt_balance < 1:
-        await message.answer("❌ Недостаточно средств для вывода. Минимум 10 USDT.")
+        msg = await message.answer("❌ Недостаточно средств для вывода. Минимум 10 USDT.")
+        chat_links.setdefault(message.from_user.id, {}).setdefault("msgs", []).append(msg.message_id)
         return
 
-    await message.answer(
+    msg = await message.answer(
         f"💸 Вы можете вывести USDT (TRC20).\n\n"
         f"Пожалуйста, отправьте адрес TRC20-кошелька, куда перевести <b>{usdt_balance:.2f} USDT</b>.\n\n"
         f"Или напишите админу с ID: <code>{message.from_user.id}</code>."
     )
+    chat_links.setdefault(message.from_user.id, {}).setdefault("msgs", []).append(msg.message_id)
+
 
 @dp.message_handler(lambda m: m.text == "📋 Объявления")
 @ban_check
 async def show_ad_options(message: types.Message):
-    await message.answer(
-        f"📊 Объявлений:\n🔴 Продажа: {len(user_ads['sell'])}\n🟢 Покупка: {len(user_ads['buy'])}"
+    msg = await message.answer(
+        f"📊 Объявлений:\n"
+        f"🔴 Продажа: {len(user_ads['sell'])}\n"
+        f"🟢 Покупка: {len(user_ads['buy'])}"
     )
+    chat_links.setdefault(message.from_user.id, {}).setdefault("msgs", []).append(msg.message_id)
+
 
 @dp.message_handler(lambda m: m.text == "🗂 Мои ордера")
 @ban_check
@@ -560,10 +566,11 @@ async def show_my_orders(message: types.Message):
     orders = user_balances.get("user_orders", {}).get(user_id, [])
 
     if not orders:
-        return await message.answer("❌ У вас нет активных ордеров.")
+        msg = await message.answer("❌ У вас нет активных ордеров.")
+        chat_links.setdefault(user_id, {}).setdefault("msgs", []).append(msg.message_id)
+        return
 
     pledge_str = get_pledge_string(user_id)
-
     for idx, ad in enumerate(orders):
         text = (
             f"<b>#{idx + 1}</b> | Тип: <b>{ad['type']}</b>\n"
@@ -576,21 +583,27 @@ async def show_my_orders(message: types.Message):
         kb = InlineKeyboardMarkup().add(
             InlineKeyboardButton("❌ Удалить", callback_data=f"delad:{idx}")
         )
-        await message.answer(text, reply_markup=kb)
+        msg = await message.answer(text, reply_markup=kb)
+        chat_links.setdefault(user_id, {}).setdefault("msgs", []).append(msg.message_id)
 
 
 @dp.message_handler(lambda m: m.text == "🟢 Покупка USDT")
 @ban_check
 async def handle_buy(message: types.Message):
-    await message.answer("💰 Выберите диапазон:", reply_markup=get_range_kb("buy"))
+    msg = await message.answer("💰 Выберите диапазон:", reply_markup=get_range_kb("buy"))
+    chat_links.setdefault(message.from_user.id, {}).setdefault("msgs", []).append(msg.message_id)
 
 @dp.message_handler(lambda m: m.text == "🔴 Продажа USDT")
 @ban_check
 async def handle_sell(message: types.Message):
     ensure_balance(message.from_user.id)
     if user_balances[message.from_user.id]["USDT (TRC20)"] < 10:
-        return await message.answer("❌ Недостаточно средств на балансе.")
-    await message.answer("💸 Выберите диапазон:", reply_markup=get_range_kb("sell"))
+        msg = await message.answer("❌ Недостаточно средств на балансе.")
+        chat_links.setdefault(message.from_user.id, {}).setdefault("msgs", []).append(msg.message_id)
+        return
+
+    msg = await message.answer("💸 Выберите диапазон:", reply_markup=get_range_kb("sell"))
+    chat_links.setdefault(message.from_user.id, {}).setdefault("msgs", []).append(msg.message_id)
 
 @dp.message_handler(commands=["clear_chat"], user_id=ADMIN_IDS)
 async def admin_clear_chat(message: types.Message):
