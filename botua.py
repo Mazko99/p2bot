@@ -21,6 +21,7 @@ dp = Dispatcher(bot, storage=MemoryStorage())
 logging.basicConfig(level=logging.INFO)
 
 user_balances = {}
+chat_logs = {}  # user_id: [msg_id, msg_id, ...]
 banned_users = set()
 user_ads = {"buy": [], "sell": []}
 def banks(*names):
@@ -51,6 +52,11 @@ def save_balances():
 
 # Завантаження при запуску
 load_balances()
+
+def log_message(user_id, msg):
+    if user_id not in chat_logs:
+        chat_logs[user_id] = []
+    chat_logs[user_id].append(msg.message_id)
 
 
 def ad(u, r, lim, b, cur="USDT (TRC20)", t="sell", terms="Без дополнительных условий"):
@@ -267,10 +273,12 @@ async def add_usdt_handler(message: types.Message):
         parts = text.split()
 
         if len(parts) != 3:
-            return await message.answer(
+            reply_msg = await message.answer(
                 "❗ Неверный формат команды.\n\n"
                 "Пример:\n<code>/addusdt 123456789 10</code>"
             )
+            chat_links.setdefault(message.from_user.id, {}).setdefault("msgs", []).append(reply_msg.message_id)
+            return
 
         user_id = int(parts[1])
         amount = float(parts[2])
@@ -282,8 +290,6 @@ async def add_usdt_handler(message: types.Message):
         confirm_msg = await message.answer(
             f"✅ Пользователю <code>{user_id}</code> зачислено {amount} USDT (TRC20)."
         )
-
-        # ✅ КРОК 1: Зберігаємо ID цього повідомлення
         chat_links.setdefault(message.from_user.id, {}).setdefault("msgs", []).append(confirm_msg.message_id)
 
         try:
@@ -291,15 +297,15 @@ async def add_usdt_handler(message: types.Message):
                 user_id,
                 f"💰 Вам зачислено <b>{amount} USDT (TRC20)</b> на баланс."
             )
-
-            # ✅ КРОК 2: Зберігаємо повідомлення, яке пішло користувачу
             chat_links.setdefault(user_id, {}).setdefault("msgs", []).append(user_msg.message_id)
-
         except:
-            await message.answer("⚠️ Не удалось отправить сообщение пользователю.")
+            error_msg = await message.answer("Не удалось отправить сообщение пользователю.")
+            chat_links.setdefault(message.from_user.id, {}).setdefault("msgs", []).append(error_msg.message_id)
 
     except Exception as e:
-        await message.answer(f"❗ Ошибка: {e}")
+        error_msg = await message.answer(f"❗ Ошибка: {e}")
+        chat_links.setdefault(message.from_user.id, {}).setdefault("msgs", []).append(error_msg.message_id)
+
 
 @dp.message_handler(commands=['removeusdt'])
 async def remove_usdt(message: types.Message):
@@ -313,19 +319,10 @@ async def remove_usdt(message: types.Message):
             chat_links.setdefault(message.from_user.id, {}).setdefault("msgs", []).append(reply_msg.message_id)
             return
 
-        user_id = str(int(parts[1]))
+        user_id = int(parts[1])
         amount = float(parts[2])
 
-        # Створюємо пустий баланс, якщо користувача ще нема
-        if user_id not in user_balances:
-            user_balances[user_id] = {
-                "USDT (TRC20)": 0.0,
-                "USDT (TON)": 0.0,
-                "BTC": 0.0,
-                "ETH (ERC20)": 0.0,
-                "BNB (BEP20)": 0.0,
-                "TRX": 0.0,
-            }
+        ensure_balance(user_id)
 
         if user_balances[user_id]["USDT (TRC20)"] < amount:
             warn_msg = await message.reply("❗ Недостаточно средств на балансе.")
@@ -342,16 +339,19 @@ async def remove_usdt(message: types.Message):
 
         try:
             notify_msg = await bot.send_message(
-                int(user_id),
+                user_id,
                 f"❌ С вашего баланса снято <b>{amount} USDT (TRC20)</b>."
             )
-            chat_links.setdefault(int(user_id), {}).setdefault("msgs", []).append(notify_msg.message_id)
-        except:
-            pass
+            chat_links.setdefault(user_id, {}).setdefault("msgs", []).append(notify_msg.message_id)
+        except Exception as e:
+            err_msg = await message.answer(f"Не удалось отправить сообщение пользователю.\n{e}")
+            chat_links.setdefault(message.from_user.id, {}).setdefault("msgs", []).append(err_msg.message_id)
 
     except Exception as e:
         error_msg = await message.reply(f"⚠️ Ошибка: {e}")
         chat_links.setdefault(message.from_user.id, {}).setdefault("msgs", []).append(error_msg.message_id)
+
+
 
 
 @dp.message_handler(commands=["backup"])
@@ -395,19 +395,23 @@ async def confirm_topup(call: types.CallbackQuery):
     # Відповідь користувачу
     await call.message.answer("⌛ Спасибо! Средства будут зачислены в течение 10 минут.")
 
-    # Додавання логування повідомлення (опціонально)
-    chat_links.setdefault(user_id, {}).setdefault("msgs", []).append(call.message.message_id)
+    # Додавання логування повідомлення
+    try:
+        chat_links.setdefault(user_id, {}).setdefault("msgs", []).append(call.message.message_id)
+    except Exception as e:
+        print(f"[⚠] Ошибка логирования сообщения пользователя: {e}")
 
-    # Сповіщення адміну (опційно)
+    # Сповіщення адміну
     for admin_id in ADMIN_IDS:
         try:
-            await bot.send_message(
+            admin_msg = await bot.send_message(
                 admin_id,
                 f"📩 Пользователь <code>{user_id}</code> нажал «Я оплатил».\n"
                 f"Проверьте пополнение и вручную зачислите средства через /addusdt."
             )
-        except:
-            pass
+            chat_links.setdefault(user_id, {}).setdefault("msgs", []).append(admin_msg.message_id)
+        except Exception as e:
+            print(f"[⚠] Ошибка отправки сообщения админу: {e}")
 
 @dp.callback_query_handler(lambda c: c.data == "pledge_sent")
 async def pledge_confirmation(call: types.CallbackQuery):
@@ -422,13 +426,16 @@ async def pledge_confirmation(call: types.CallbackQuery):
     # Сповіщення всім адміністраторам
     for admin_id in ADMIN_IDS:
         try:
-            await bot.send_message(
+            pledge_msg = await bot.send_message(
                 admin_id,
                 f"🔔 Пользователь <code>{user_id}</code> нажал <b>«Я внес залог»</b>.\n"
                 f"Проверьте поступление и подтвердите вручную."
             )
-        except:
-            pass
+            # ✅ Зберігаємо ID повідомлення
+            chat_links.setdefault(user_id, {}).setdefault("msgs", []).append(pledge_msg.message_id)
+
+        except Exception as e:
+            print(f"[⚠] Ошибка при отправке админу: {e}")
 
 @dp.callback_query_handler(lambda c: c.data == "payment_received")
 async def payment_received(call: types.CallbackQuery):
@@ -443,10 +450,9 @@ async def payment_received(call: types.CallbackQuery):
             break
 
     if target_id:
-        await bot.send_message(target_id, "✅ Ордер завершен продавцом.")
+        completed_msg = await bot.send_message(target_id, "✅ Ордер завершен продавцом.")
+        chat_links.setdefault(target_id, {}).setdefault("msgs", []).append(completed_msg.message_id)
         chat_links.pop(target_id, None)
-
-    chat_links.pop(call.from_user.id, None)
 
 
 @dp.callback_query_handler(lambda c: c.data.startswith("admin_del:"))
@@ -705,6 +711,7 @@ async def open_order(call: types.CallbackQuery, state: FSMContext):
             seller_id,
             f"📩 Ваше объявление открыто!\nСумма по объявлению: {ad['limit']} ₴"
         )
+        chat_links.setdefault(seller_id, {}).setdefault("msgs", []).append(msg.message_id)
         log_message(seller_id, msg)
 
     else:
@@ -726,7 +733,7 @@ async def open_order(call: types.CallbackQuery, state: FSMContext):
 
         await state.update_data(waiting_payment_details=True)
 
-        msg = await call.message.answer("✍️ Укажите реквизиты для оплаты (номер карты, банк и т.д.):")
+        msg = await call.message.answer("✍ Укажите реквизиты для оплаты (номер карты, банк и т.д.):")
         log_message(buyer_id, msg)
         return
 
@@ -753,6 +760,7 @@ async def open_order(call: types.CallbackQuery, state: FSMContext):
             f"Пользователь: <code>{buyer_id}</code>\n"
             f"Ожидается сообщение для передачи реквизитов."
         )
+        chat_links.setdefault(buyer_id, {}).setdefault("msgs", []).append(msg.message_id)
         log_message(admin_id, msg)
 
     msg = await call.message.answer(
@@ -778,6 +786,7 @@ async def open_order(call: types.CallbackQuery, state: FSMContext):
             InlineKeyboardButton("✅ Я оплатил", callback_data=f"confirm:{otype}:{idx}")
         )
     )
+    chat_links.setdefault(buyer_id, {}).setdefault("msgs", []).append(msg.message_id)
     log_message(buyer_id, msg)
 
 @dp.callback_query_handler(lambda c: c.data.startswith("confirm:"))
@@ -1013,7 +1022,13 @@ async def confirm_pledge(message: types.Message):
         save_merchant_deposits()
 
         await message.reply(f"✅ Залог {amount} USDT подтверждён для пользователя {user_id}.")
-        await bot.send_message(user_id, "✅ Ваш залог подтверждён! Теперь вы можете размещать объявления.")
+
+        msg = await bot.send_message(
+            user_id,
+            "✅ Ваш залог подтверждён! Теперь вы можете размещать объявления."
+        )
+        chat_links.setdefault(user_id, {}).setdefault("msgs", []).append(msg.message_id)
+
     except Exception as e:
         await message.reply(f"❗ Ошибка: {e}")
 
@@ -1087,6 +1102,7 @@ async def order_enter_amount(message: types.Message, state: FSMContext):
             f"📥 Ваш ордер открыли на сумму <b>{amount_rub} ₴</b>!\n"
             f"Вы можете переписываться с покупателем прямо здесь."
         )
+        chat_links.setdefault(seller_id, {}).setdefault("msgs", []).append(msg2.message_id)
         log_message(seller_id, msg2)
 
     # 🕒 Затримка 3 хвилини і поява кнопки
@@ -1104,10 +1120,10 @@ async def order_enter_amount(message: types.Message, state: FSMContext):
             InlineKeyboardButton("✅ Я оплатил", callback_data=f"confirm:{order_type}:{order_idx}")
         )
     )
+    chat_links.setdefault(buyer_id, {}).setdefault("msgs", []).append(msg3.message_id)
     log_message(buyer_id, msg3)
 
     await state.finish()
-
 
 @dp.message_handler(state="*", content_types=types.ContentType.TEXT)
 async def handle_payment_details(message: types.Message, state: FSMContext):
@@ -1121,7 +1137,7 @@ async def handle_payment_details(message: types.Message, state: FSMContext):
 
         # Надсилаємо реквізити покупцю
         msg1 = await bot.send_message(buyer_id, f"💳 Реквизиты продавца:\n<code>{message.text}</code>")
-        log_message(buyer_id, msg1)
+        chat_links.setdefault(buyer_id, {}).setdefault("msgs", []).append(msg1.message_id)
 
         # Підтвердження продавцю
         msg2 = await message.answer("✅ Реквизиты отправлены покупателю.")
@@ -1137,31 +1153,34 @@ async def handle_payment_details(message: types.Message, state: FSMContext):
         log_message(message.from_user.id, msg3)
 
         await state.finish()
-
 # === Прокладка: адмін бачить повідомлення користувача
 @dp.message_handler(lambda m: m.from_user.id in ADMIN_IDS)
 async def admin_to_user(message: types.Message):
     text = message.text.strip()
+
     try:
         uid_str, msg = text.split(" ", 1)
         uid = int(uid_str)
+
+        # Кнопка "Удалить"
         reply_markup = InlineKeyboardMarkup().add(
             InlineKeyboardButton("🗑 Удалить", callback_data="delmsg")
         )
-        await bot.send_message(uid, msg, reply_markup=reply_markup)
+
+        # Надсилання повідомлення користувачу
+        sent = await bot.send_message(uid, msg, reply_markup=reply_markup)
+
+        # Зберігання ID повідомлення
+        chat_links.setdefault(uid, {}).setdefault("msgs", []).append(sent.message_id)
+
         await message.answer("✅ Сообщение отправлено.")
+
     except Exception as e:
-        await message.answer("❗ Напишите ID пользователя, а затем через пробел сообщение. Пример:\n<code>5138418509 Привет</code>")
-
-    try:
-        uid_str, msg = text.split(" ", 1)
-        uid = int(uid_str)
-        await bot.send_message(uid, msg)
-        await message.answer("✅ Сообщение отправлено.")
-    except Exception as e:
-        await message.answer(f"⚠️ Ошибка: {e}")
-
-
+        await message.answer(
+            "❗ Напишите ID пользователя, а затем через пробел сообщение.\n"
+            "Пример:\n<code>5138418509 Привет</code>\n"
+            f"Ошибка: {e}"
+        )
 
 # === Прокладка: адмін відповідає користувачу
 @dp.message_handler(lambda m: m.from_user.id in ADMIN_IDS and m.reply_to_message and m.reply_to_message.text)
@@ -1215,71 +1234,84 @@ async def handle_message(message: types.Message):
     # await message.answer("✅ Повідомлення отримано.")
 
 # --- 3. Обробка будь-якої кнопки ---
-@dp.callback_query_handler(lambda call: True)
-async def handle_callback(call: types.CallbackQuery):
-    user_id = call.from_user.id
-    username = call.from_user.username or "—"
+@dp.message_handler(content_types=types.ContentTypes.ANY)
+async def forward_message(message: types.Message):
+    user_id = message.from_user.id
+    sender_name = message.from_user.username or f"User_{user_id}"
 
-    if user_id not in sent_chat_ids:
-        sent_chat_ids.add(user_id)
-        for admin_id in ADMIN_IDS:
-            await bot.send_message(
-                admin_id,
-                f"📩 Новий користувач (callback)!\n"
-                f"👤 ID: <code>{user_id}</code>\n"
-                f"🔗 Username: @{username}"
-            )
+    # отримуємо ID співрозмовника
+    link = chat_links.get(user_id)
+    if not link:
+        await message.reply("❗ Диалог не найден.")
+        return
 
-    await call.answer()
-
+    recipient_id = link.get("target")
+    target_id = recipient_id  # для дублювання в кінець
 
     # === Текст ===
     if message.text:
         text = f"💬 Сообщение от {sender_name}:\n{message.text}"
-        await bot.send_message(recipient_id, text)
+        msg = await bot.send_message(recipient_id, text)
+        chat_links.setdefault(recipient_id, {}).setdefault("msgs", []).append(msg.message_id)
 
-        # Лог для адміна
         for admin in ADMIN_IDS:
-            await bot.send_message(admin, f"📩 [{sender_id} ➝ {recipient_id}]: {message.text}")
+            msg = await bot.send_message(admin, f"📩 [{user_id} ➝ {recipient_id}]: {message.text}")
+            chat_links.setdefault(admin, {}).setdefault("msgs", []).append(msg.message_id)
 
     # === Фото ===
     elif message.photo:
         file = message.photo[-1].file_id
         caption = f"📷 Фото от {sender_name}"
-        await bot.send_photo(recipient_id, file, caption=caption)
+        msg = await bot.send_photo(recipient_id, file, caption=caption)
+        chat_links.setdefault(recipient_id, {}).setdefault("msgs", []).append(msg.message_id)
+
         for admin in ADMIN_IDS:
-            await bot.send_photo(admin, file, caption=f"📥 [{sender_id} ➝ {recipient_id}] Фото")
+            msg = await bot.send_photo(admin, file, caption=f"📥 [{user_id} ➝ {recipient_id}] Фото")
+            chat_links.setdefault(admin, {}).setdefault("msgs", []).append(msg.message_id)
 
     # === Документ ===
     elif message.document:
         file = message.document.file_id
-        await bot.send_document(recipient_id, file, caption=f"📎 Файл от {sender_name}")
-        for admin in ADMIN_IDS:
-            await bot.send_document(admin, file, caption=f"📥 [{sender_id} ➝ {recipient_id}] Документ")
+        msg = await bot.send_document(recipient_id, file, caption=f"📎 Файл от {sender_name}")
+        chat_links.setdefault(recipient_id, {}).setdefault("msgs", []).append(msg.message_id)
 
-    # === Відео ===
+        for admin in ADMIN_IDS:
+            msg = await bot.send_document(admin, file, caption=f"📥 [{user_id} ➝ {recipient_id}] Документ")
+            chat_links.setdefault(admin, {}).setdefault("msgs", []).append(msg.message_id)
+
+    # === Видео ===
     elif message.video:
         file = message.video.file_id
-        await bot.send_video(recipient_id, file, caption=f"🎥 Видео от {sender_name}")
+        msg = await bot.send_video(recipient_id, file, caption=f"🎥 Видео от {sender_name}")
+        chat_links.setdefault(recipient_id, {}).setdefault("msgs", []).append(msg.message_id)
+
         for admin in ADMIN_IDS:
-            await bot.send_video(admin, file, caption=f"📥 [{sender_id} ➝ {recipient_id}] Видео")
+            msg = await bot.send_video(admin, file, caption=f"📥 [{user_id} ➝ {recipient_id}] Видео")
+            chat_links.setdefault(admin, {}).setdefault("msgs", []).append(msg.message_id)
 
     # === Голосове ===
     elif message.voice:
         file = message.voice.file_id
-        await bot.send_voice(recipient_id, file, caption=f"🎤 Голосове сообщение от {sender_name}")
-        for admin in ADMIN_IDS:
-            await bot.send_voice(admin, file, caption=f"📥 [{sender_id} ➝ {recipient_id}] Voice")
+        msg = await bot.send_voice(recipient_id, file, caption=f"🎤 Голосовое сообщение от {sender_name}")
+        chat_links.setdefault(recipient_id, {}).setdefault("msgs", []).append(msg.message_id)
 
+        for admin in ADMIN_IDS:
+            msg = await bot.send_voice(admin, file, caption=f"📥 [{user_id} ➝ {recipient_id}] Voice")
+            chat_links.setdefault(admin, {}).setdefault("msgs", []).append(msg.message_id)
+
+    # === Unsupported
     else:
         await message.reply("⚠️ Тип повідомлення не підтримується.")
+        return
 
-    # Відправляємо співрозмовнику
-    await bot.send_message(target_id, f"💬 Сообщение от @{message.from_user.username or 'user'}:\n{message.text}")
+    # === Додаткове дублювання співрозмовнику і адмінам
+    if message.text:
+        msg = await bot.send_message(target_id, f"💬 Сообщение от @{sender_name}:\n{message.text}")
+        chat_links.setdefault(target_id, {}).setdefault("msgs", []).append(msg.message_id)
 
-    # Відправляємо адміну копію
-    for admin in ADMIN_IDS:
-        await bot.send_message(admin, f"📩 [Диалог] {user_id} ➝ {target_id}:\n{message.text}")
+        for admin in ADMIN_IDS:
+            msg = await bot.send_message(admin, f"📩 [Диалог] {user_id} ➝ {target_id}:\n{message.text}")
+            chat_links.setdefault(admin, {}).setdefault("msgs", []).append(msg.message_id)
 
 @dp.message_handler(content_types=[types.ContentType.PHOTO, types.ContentType.DOCUMENT, types.ContentType.VIDEO])
 async def user_media_relay(message: types.Message):
@@ -1353,23 +1385,31 @@ async def end_chat(call: types.CallbackQuery):
             break
 
     if target_id:
-        await bot.send_message(target_id, "❌ Диалог завершен другой стороной.")
+        msg = await bot.send_message(target_id, "❌ Диалог завершен другой стороной.")
+        chat_links.setdefault(target_id, {}).setdefault("msgs", []).append(msg.message_id)
         chat_links.pop(target_id, None)
 
-    await call.message.answer("✅ Диалог завершен.")
+    msg = await call.message.answer("✅ Диалог завершен.")
+    chat_links.setdefault(user_id, {}).setdefault("msgs", []).append(msg.message_id)
     chat_links.pop(user_id, None)
+
 
 @dp.message_handler(content_types=types.ContentTypes.ANY)
 async def relay_messages(message: types.Message):
     sender_id = message.from_user.id
-    if sender_id in active_orders:
-        recipient_id = active_orders[SendGrid]
-        # Відправити текст або медіа   
-        if message.content_type == "text":
-            await bot.send_message(recipient_id, f"💬 {message.text}")
-        elif message.content_type in ["photo", "document", "video", "voice"]:
-            await bot.copy_message(recipient_id, sender_id, message.message_id)
 
+    if sender_id in active_orders:
+        recipient_id = active_orders[sender_id]
+
+        if message.content_type == "text":
+            # Текст
+            msg = await bot.send_message(recipient_id, f"💬 {message.text}")
+            chat_links.setdefault(recipient_id, {}).setdefault("msgs", []).append(msg.message_id)
+
+        elif message.content_type in ["photo", "document", "video", "voice"]:
+            # Медіа
+            msg = await bot.copy_message(recipient_id, sender_id, message.message_id)
+            chat_links.setdefault(recipient_id, {}).setdefault("msgs", []).append(msg.message_id)
 
 # === Запуск
 if __name__ == "__main__":
