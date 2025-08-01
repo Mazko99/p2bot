@@ -933,6 +933,24 @@ async def ad_choose_type(call: types.CallbackQuery, state: FSMContext):
     log_message(user_id, msg)
 
 
+@dp.message_handler(commands=['unban'])
+async def unban_user(message: types.Message):
+    if message.from_user.id not in ADMIN_IDS:
+        return await message.answer("❌ У вас нет прав на эту команду.")
+
+    try:
+        parts = message.text.split()
+        if len(parts) < 2:
+            return await message.answer("⚠️ Используйте формат: <code>/unban user_id</code>")
+
+        user_id = int(parts[1])
+        banned_users.discard(user_id)  # розблокує, якщо є
+
+        await message.answer(f"✅ Пользователь <code>{user_id}</code> разблокирован.")
+    except Exception as e:
+        await message.answer(f"❗ Ошибка: {e}")
+
+
 @dp.callback_query_handler(lambda c: c.data == "delmsg")
 async def handle_delete_message(call: types.CallbackQuery):
     if call.from_user.id not in ADMIN_IDS:
