@@ -689,37 +689,47 @@ async def show_filtered_ads(call: types.CallbackQuery):
     min_sum, max_sum = map(int, rng.split("-"))
     ads = user_ads[prefix]
 
-    def limit_in_range(ad_limit, selected_min, selected_max):
+    def limit_in_range(ad_limit, sel_min, sel_max):
         try:
             ad_min, ad_max = parse_limit(ad_limit)
-            return selected_min <= ad_min and ad_max <= selected_max
+            return sel_min <= ad_min and ad_max <= sel_max
         except:
             return False
 
-    filtered = [ad for ad in ads if limit_in_range(ad["limit"], min_sum, max_sum)]
+    # собираем пары (оригинальный индекс, ad)
+    filtered_pairs = [
+        (orig_idx, ad)
+        for orig_idx, ad in enumerate(ads)
+        if limit_in_range(ad["limit"], min_sum, max_sum)
+    ]
 
-    if not filtered:
+    if not filtered_pairs:
         msg = await call.message.answer("🔍 Объявлений не найдено.")
         log_message(call.from_user.id, msg)
         return
 
     msg_ids = []
-
-    for display_idx, ad in enumerate(filtered):
+    for display_idx, (orig_idx, ad) in enumerate(filtered_pairs, start=1):
         kb = InlineKeyboardMarkup().add(
-            InlineKeyboardButton("📩 Открыть ордер", callback_data=f"open:{prefix}:{display_idx}")
+            InlineKeyboardButton(
+                "📩 Открыть ордер",
+                callback_data=f"open:{prefix}:{orig_idx}"
+            )
         )
         if call.from_user.id in ADMIN_IDS:
-            kb.add(InlineKeyboardButton("🗑 Удалить (админом)", callback_data=f"admin_del:{prefix}:{display_idx}"))
+            kb.add(InlineKeyboardButton(
+                "🗑 Удалить (админом)",
+                callback_data=f"admin_del:{prefix}:{orig_idx}"
+            ))
 
         msg = await call.message.answer(fmt_ad(ad, display_idx), reply_markup=kb)
         log_message(call.from_user.id, msg)
-        chat_links.setdefault(call.from_user.id, {}).setdefault("msgs", []).append(msg.message_id)
         msg_ids.append(msg.message_id)
 
-    # тягнемо всі нові msg_id в існуючий список, не перезаписуючи його
-    chat_links.setdefault(call.from_user.id, {}).setdefault("msgs", []).extend(msg_ids)
-    chat_links[call.from_user.id]["admins"] = ADMIN_IDS.copy()
+    # Правильно добавляем все msg_id в chat_links без NameError
+    links = chat_links.setdefault(call.from_user.id, {})
+    links.setdefault("msgs", []).extend(msg_ids)
+    links["admins"] = ADMIN_IDS.copy()
 
 
 @dp.callback_query_handler(lambda c: c.data.startswith("open:"), state="*")
@@ -809,7 +819,8 @@ async def open_order(call: types.CallbackQuery, state: FSMContext):
             f"Ожидается сообщение для передачи реквизитов."
         )
         chat_links.setdefault(buyer_id, {}).setdefault("msgs", []).append(msg.message_id)
-        log_message(admin_id, msg)
+
+    chat_links[buyer_id]["admins"] = ADMIN_IDS.copy()
 
     msg = await call.message.answer(
         "💬 Ордер открыт. Вы можете переписываться здесь.\n\n"
