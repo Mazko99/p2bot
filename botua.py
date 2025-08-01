@@ -485,7 +485,7 @@ async def close_order(call: types.CallbackQuery):
     user_id = call.from_user.id
     pair_id = active_orders.pop(user_id, None)
     if pair_id:
-        active_orders.pop(pair_id, None
+        active_orders.pop(pair_id, None)
 
 @dp.callback_query_handler(lambda c: c.data.startswith("buy:") or c.data.startswith("sell:"))
 @ban_check
