@@ -515,11 +515,14 @@ async def show_filtered_ads(call: types.CallbackQuery):
             kb.add(InlineKeyboardButton("🗑 Удалить (админом)", callback_data=f"admin_del:{prefix}:{i}"))
 
         msg = await call.message.answer(fmt_ad(ad, i), reply_markup=kb)
-        msg_ids.append(msg.message_id)
+msg_ids.append(msg.message_id)
 
-    chat_links[call.from_user.id] = {
-        "msgs": msg_ids,
-        "admins": ADMIN_IDS.copy()
+# додати або оновити chat_links[uid]
+if call.from_user.id not in chat_links:
+    chat_links[call.from_user.id] = {}
+
+chat_links[call.from_user.id]["msgs"] = msg_ids
+chat_links[call.from_user.id]["admins"] = ADMIN_IDS.copy()
     }
 from aiogram.dispatcher.filters.state import State, StatesGroup
 
@@ -572,9 +575,21 @@ async def open_order(call: types.CallbackQuery, state: FSMContext):
 
     # === Якщо це ПРОДАЖ — продавець має ввести реквізити ===
     if otype == "sell":
-        await state.update_data(waiting_payment_details=True)
-        await call.message.answer("✍️ Укажите реквизиты для оплаты (номер карты, банк и т.д.):")
+    seller_id = int(ad["username"].replace("User_", "")) if ad["username"].startswith("User_") else None
+
+    if seller_id and user_balances.get(seller_id, {}).get("USDT (TRC20)", 0) < 12:
+        await call.message.answer("❌ Недостаточно средств на балансе для открытия ордера. Минимум: 12 USDT.")
         return
+
+    await state.update_data(
+        order_type=otype,
+        order_idx=idx,
+        ad_data=ad,
+        buyer_id=buyer_id,
+        waiting_payment_details=True
+    )
+    await call.message.answer("✍️ Укажите реквизиты для оплаты (номер карты, банк и т.д.):")
+    return
 
     # === Якщо це ПОКУПКА — питаємо суму в покупця ===
     await OrderForm.amount_rub.set()
