@@ -507,20 +507,29 @@ async def admin_chat_list(message: types.Message):
         )
         await message.answer(text, reply_markup=kb)
 
-@dp.callback_query_handler(lambda c: c.data == "close_order")
-@ban_check
-async def close_order(call: types.CallbackQuery):
+@dp.callback_query_handler(lambda c: c.data == "close_order", state="*")
+async def close_order(call: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    otype = data.get("order_type")
+
+    if otype == "buy":
+        return await call.message.answer("❌ Эта кнопка недоступна при покупке.")
+
     try:
         await bot.delete_message(call.message.chat.id, call.message.message_id)
-        await call.message.answer("✅ Ордер закрыт.", reply_markup=get_main_kb(call.from_user.id))  # ✅
     except:
-        await call.message.answer("⚠️ Не удалось закрыть ордер.")
+        pass
+
+    await call.message.answer("✅ Ордер закрыт.", reply_markup=get_main_kb(call.from_user.id))
 
     # 💬 Очистка активного чату
     user_id = call.from_user.id
     pair_id = active_orders.pop(user_id, None)
     if pair_id:
         active_orders.pop(pair_id, None)
+
+    await state.finish()
+
 
 @dp.callback_query_handler(lambda c: c.data.startswith("buy:") or c.data.startswith("sell:"))
 @ban_check
@@ -608,28 +617,20 @@ async def open_order(call: types.CallbackQuery, state: FSMContext):
             buyer_id=buyer_id
         )
 
-    # === Якщо це ПРОДАЖ — продавець має ввести реквізити ===
+    # === Якщо це ПРОДАЖ — продавець має ввести реквізити
     if otype == "sell":
         seller_id = int(ad["username"].replace("User_", "")) if ad["username"].startswith("User_") else None
 
-        # ⛔ Перевірка балансу продавця
         if seller_id and user_balances.get(seller_id, {}).get("USDT (TRC20)", 0) < 12:
             await call.message.answer("❌ Недостаточно средств на балансе для открытия ордера. Минимум: 12 USDT.")
             return
 
-        # ⛔ Перевірка застави
-        # Якщо користувач відкриває ордер на продаж, перевірка балансу
-if seller_id and user_balances.get(seller_id, {}).get("USDT (TRC20)", 0) < 12:
-    await call.message.answer("❌ Недостаточно средств на балансе для открытия ордера. Минимум: 12 USDT.")
-    return
+        await state.update_data(waiting_payment_details=True)
 
-        await state.update_data(
-            waiting_payment_details=True
-        )
         await call.message.answer("✍️ Укажите реквизиты для оплаты (номер карты, банк и т.д.):")
         return
 
-    # === Якщо це ПОКУПКА — питаємо суму в покупця ===
+    # === Якщо це ПОКУПКА — питаємо суму в покупця
     await OrderForm.amount_rub.set()
     await call.message.answer("💰 Введите сумму в UAH, которую хотите обменять:")
 
@@ -660,7 +661,13 @@ if seller_id and user_balances.get(seller_id, {}).get("USDT (TRC20)", 0) < 12:
         )
     )
 
+    # Затримка 3 хвилини і поява кнопки "Я оплатил"
     await asyncio.sleep(180)
+
+    if chat_links.get(buyer_id, {}).get("confirm_sent"):
+        return
+    chat_links[buyer_id]["confirm_sent"] = True
+
     await bot.send_message(
         buyer_id,
         "Если вы произвели оплату, нажмите ниже:",
@@ -889,11 +896,11 @@ async def order_enter_amount(message: types.Message, state: FSMContext):
 
     ad = data["ad_data"]
     buyer_id = message.from_user.id
-    seller_id = ad.get("user_id")
+    seller_id = int(ad["username"].replace("User_", "")) if ad["username"].startswith("User_") else None
     order_type = data["order_type"]
     order_idx = data["order_idx"]
 
-    # === 1. Перевіряємо, чи входить введена сума в діапазон оголошення ===
+    # === 1. Перевіряємо, чи входить введена сума в діапазон ===
     try:
         min_limit, max_limit = parse_limit(ad["limit"])
         if not (min_limit <= amount_rub <= max_limit):
@@ -904,29 +911,27 @@ async def order_enter_amount(message: types.Message, state: FSMContext):
     except:
         return await message.answer("❌ Невозможно определить диапазон лимита объявления.")
 
-    # === 2. Якщо це ПРОДАЖ — перевіряємо, чи є достатньо USDT на суму ===
-    if order_type == "sell":
-        seller_id = int(ad["username"].replace("User_", "")) if ad["username"].startswith("User_") else None
-        if seller_id:
-            usdt_balance = user_balances.get(seller_id, {}).get("USDT (TRC20)", 0)
-            required_usdt = round(amount_rub / ad["rate"], 2)
+    # === 2. Якщо це ПРОДАЖ — перевіряємо баланс USDT у продавця ===
+    if order_type == "sell" and seller_id:
+        usdt_balance = user_balances.get(seller_id, {}).get("USDT (TRC20)", 0)
+        required_usdt = round(amount_rub / ad["rate"], 2)
 
-            if usdt_balance < required_usdt:
-                return await message.answer(
-                    f"❌ Недостаточно USDT на балансе для открытия ордера.\n"
-                    f"Необходимо как минимум <b>{required_usdt} USDT</b> (текущий баланс: {usdt_balance} USDT)"
-                )
+        if usdt_balance < required_usdt:
+            return await message.answer(
+                f"❌ Недостаточно USDT на балансе для открытия ордера.\n"
+                f"Нужно: <b>{required_usdt} USDT</b>, есть: <b>{usdt_balance} USDT</b>"
+            )
 
-            # списуємо з балансу
-            user_balances[seller_id]["USDT (TRC20)"] -= required_usdt
-            save_balances()
+        # списуємо з балансу
+        user_balances[seller_id]["USDT (TRC20)"] -= required_usdt
+        save_balances()
 
-    # === Зв'язок між юзерами
+    # === Зв'язок
     chat_links[buyer_id] = {"target": seller_id, "admins": ADMIN_IDS.copy()}
     if seller_id:
         chat_links[seller_id] = {"target": buyer_id, "admins": ADMIN_IDS.copy()}
 
-    # Повідомлення покупцю
+    # ✅ Покупцю
     await message.answer(
         f"📩 Ордер открыт!\nСумма: <b>{amount_rub} ₴</b>\nОжидайте реквизиты.",
         reply_markup=InlineKeyboardMarkup().add(
@@ -934,7 +939,7 @@ async def order_enter_amount(message: types.Message, state: FSMContext):
         )
     )
 
-    # Повідомлення продавцю
+    # ✅ Продавцю
     if seller_id:
         await bot.send_message(
             seller_id,
@@ -942,24 +947,24 @@ async def order_enter_amount(message: types.Message, state: FSMContext):
             f"Вы можете переписываться с покупателем прямо здесь."
         )
 
-    await asyncio.sleep(180)
+    # 🕒 Затримка 3 хвилини і показ кнопки "Я оплатил"
+    await asyncio.sleep(120)
 
-# Перевірка, чи не відправляли вже кнопку
-if chat_links.get(buyer_id, {}).get("confirm_button_sent"):
-    return
+    if chat_links.get(buyer_id, {}).get("confirm_button_sent"):
+        return
 
-chat_links[buyer_id]["confirm_button_sent"] = True
-await bot.send_message(
-    buyer_id,
-    "Если вы произвели оплату, нажмите ниже:",
-    reply_markup=InlineKeyboardMarkup().add(
-        InlineKeyboardButton("✅ Я оплатил", callback_data=f"confirm:{otype}:{idx}")
+    chat_links[buyer_id]["confirm_button_sent"] = True
+
+    await bot.send_message(
+        buyer_id,
+        "Если вы произвели оплату, нажмите ниже:",
+        reply_markup=InlineKeyboardMarkup().add(
+            InlineKeyboardButton("✅ Я оплатил", callback_data=f"confirm:{order_type}:{order_idx}")
+        )
     )
-)
 
-    user_ads[data["adtype"]].append(ad)
-    await message.answer("✅ Объявление добавлено.", reply_markup=get_main_kb(message.from_user.id))
     await state.finish()
+
 
 
 @dp.message_handler(state="*", content_types=types.ContentType.TEXT)
