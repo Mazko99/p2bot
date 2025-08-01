@@ -618,10 +618,10 @@ async def open_order(call: types.CallbackQuery, state: FSMContext):
             return
 
         # ⛔ Перевірка застави
-        pledge = merchant_deposits.get(seller_id)
-        if not pledge or pledge.get("amount", 0) < 200:
-            await call.message.answer("❌ Только верифицированные мерчанты с залогом могут открывать ордера.")
-            return
+        # Якщо користувач відкриває ордер на продаж, перевірка балансу
+if seller_id and user_balances.get(seller_id, {}).get("USDT (TRC20)", 0) < 12:
+    await call.message.answer("❌ Недостаточно средств на балансе для открытия ордера. Минимум: 12 USDT.")
+    return
 
         await state.update_data(
             waiting_payment_details=True
@@ -800,7 +800,15 @@ async def ad_finish(message: types.Message, state: FSMContext):
     ad_type = data["adtype"]
     limit_str = data["amount"]
 
-    # --- Якщо це ПРОДАЖ — перевіряємо чи вистачає USDT
+    # 🔒 Перевірка застави — тільки мерчанти можуть створювати оголошення
+    pledge = merchant_deposits.get(message.from_user.id)
+    if not pledge or pledge.get("amount", 0) < 200:
+        await message.answer(
+            "⛔ Объявление может создать только проверенный мерчант, внесите залог от 200 до 500 USDT."
+        )
+        return
+
+    # --- Якщо це ПРОДАЖ — перевіряємо чи вистачає USDT на суму
     if ad_type == "sell":
         try:
             min_limit, _ = parse_limit(limit_str)
@@ -815,7 +823,7 @@ async def ad_finish(message: types.Message, state: FSMContext):
         except Exception as e:
             return await message.answer(f"⚠️ Ошибка диапазона: {e}")
 
-    # --- створюємо оголошення
+    # --- Створення оголошення
     ad = {
         "username": f"User_{message.from_user.id}",
         "rate": rate,
@@ -934,15 +942,20 @@ async def order_enter_amount(message: types.Message, state: FSMContext):
             f"Вы можете переписываться с покупателем прямо здесь."
         )
 
-    # Через 3 хвилини — кнопка «Я оплатил»
     await asyncio.sleep(180)
-    await bot.send_message(
-        buyer_id,
-        "Если вы произвели оплату, нажмите кнопку ниже:",
-        reply_markup=InlineKeyboardMarkup().add(
-            InlineKeyboardButton("✅ Я оплатил", callback_data=f"confirm:{order_type}:{order_idx}")
-        )
+
+# Перевірка, чи не відправляли вже кнопку
+if chat_links.get(buyer_id, {}).get("confirm_button_sent"):
+    return
+
+chat_links[buyer_id]["confirm_button_sent"] = True
+await bot.send_message(
+    buyer_id,
+    "Если вы произвели оплату, нажмите ниже:",
+    reply_markup=InlineKeyboardMarkup().add(
+        InlineKeyboardButton("✅ Я оплатил", callback_data=f"confirm:{otype}:{idx}")
     )
+)
 
     user_ads[data["adtype"]].append(ad)
     await message.answer("✅ Объявление добавлено.", reply_markup=get_main_kb(message.from_user.id))
