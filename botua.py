@@ -282,7 +282,11 @@ async def start(message: types.Message):
     ensure_balance(message.from_user.id)
     
     # 🟡 Відправка повідомлення
-    msg = await message.answer("👋 Добро пожаловать!", reply_markup=get_main_kb(message.from_user.id))
+    msg = await message.answer(
+        "👋 Добро пожаловать!",
+        reply_markup=get_main_kb(message.from_user.id)
+    )
+    chat_links.setdefault(message.from_user.id, {}).setdefault("msgs", []).append(msg.message_id)
 
     # ✅ КРОК 1: Зберігаємо message_id
     user_id = message.from_user.id
@@ -404,12 +408,15 @@ async def handle_top_up(message: types.Message):
         f"⚠️ Мин. сумма пополнения — <b>{MIN_TOPUP}$</b>.\n"
         f"После оплаты нажмите кнопку ниже."
     )
+    chat_links.setdefault(message.from_user.id, {}).setdefault("msgs", []).append(msg.message_id)
+
     msg = await message.answer(
         txt,
         reply_markup=InlineKeyboardMarkup().add(
             InlineKeyboardButton("✅ Я оплатил", callback_data="topup_done")
         )
     )
+    chat_links.setdefault(message.from_user.id, {}).setdefault("msgs", []).append(msg.message_id)
 
     # 💬 Зберігаємо message_id для подальшої очистки або історії
     chat_links.setdefault(message.from_user.id, {}).setdefault("msgs", []).append(msg.message_id)
@@ -444,10 +451,9 @@ async def pledge_confirmation(call: types.CallbackQuery):
     user_id = call.from_user.id
 
     # Відповідь користувачу
-    await call.message.answer(
-        "⌛ Спасибо!\n"
-        "Ожидайте от 10 до 30 минут — администрация проверит ваш залог и откроет доступ к публикации."
-    )
+    await call.message.answer("⌛ Спасибо! Ожидайте от 10 до 30 минут...")
+    # можеш додати:
+    chat_links.setdefault(call.from_user.id, {}).setdefault("msgs", []).append(call.message.message_id)
 
     # Сповіщення всім адміністраторам
     for admin_id in ADMIN_IDS:
@@ -586,27 +592,34 @@ async def handle_sell(message: types.Message):
         return await message.answer("❌ Недостаточно средств на балансе.")
     await message.answer("💸 Выберите диапазон:", reply_markup=get_range_kb("sell"))
 
-@dp.message_handler(commands=["clear_chat"], commands_prefix="/", user_id=ADMIN_IDS)
+@dp.message_handler(commands=["clear_chat"], user_id=ADMIN_IDS)
 async def admin_clear_chat(message: types.Message):
     args = message.text.strip().split()
-    if len(args) < 2:
-        return await message.answer("⚠️ Введите команду в формате:\n<code>/clear_chat USER_ID</code>")
+    if len(args) != 2:
+        return await message.answer("⚠️ Введи команду так:\n<code>/clear_chat USER_ID</code>")
 
     try:
         target_id = int(args[1])
 
+        # Отримуємо список збережених message_id
         msgs = chat_links.get(target_id, {}).get("msgs", [])
+        if not msgs:
+            return await message.answer("ℹ️ У пользователя нет сохранённых сообщений.")
+
         deleted_count = 0
 
         for msg_id in msgs:
+            if not isinstance(msg_id, int):
+                continue
             try:
                 await bot.delete_message(chat_id=target_id, message_id=msg_id)
                 deleted_count += 1
             except Exception as e:
-                continue  # игнорируем ошибки при удалении
+                logging.warning(f"[DEL] Не вдалося видалити msg_id={msg_id}: {e}")
 
-        await message.answer(f"🧹 Удалено сообщений: {deleted_count} из чата <code>{target_id}</code>")
+        # Очищаємо лог
         chat_links[target_id]["msgs"] = []
+        await message.answer(f"✅ Удалено {deleted_count} сообщений у пользователя <code>{target_id}</code>")
 
     except Exception as e:
         await message.answer(f"❌ Ошибка: {e}")
@@ -692,6 +705,7 @@ async def show_filtered_ads(call: types.CallbackQuery):
             kb.add(InlineKeyboardButton("🗑 Удалить (админом)", callback_data=f"admin_del:{prefix}:{i}"))
 
         msg = await call.message.answer(fmt_ad(ad, i), reply_markup=kb)
+        chat_links.setdefault(call.from_user.id, {}).setdefault("msgs", []).append(msg.message_id)
         msg_ids.append(msg.message_id)
 
     # додати або оновити chat_links[uid]
@@ -1204,6 +1218,7 @@ async def handle_payment_details(message: types.Message, state: FSMContext):
         # Підтвердження продавцю
         msg2 = await message.answer("✅ Реквизиты отправлены покупателю.")
         log_message(message.from_user.id, msg2)
+        chat_links.setdefault(message.from_user.id, {}).setdefault("msgs", []).append(msg2.message_id)
 
         # Кнопка "Средства получены"
         msg3 = await message.answer(
@@ -1212,6 +1227,7 @@ async def handle_payment_details(message: types.Message, state: FSMContext):
                 InlineKeyboardButton("✅ Средства получены", callback_data="payment_received")
             )
         )
+        chat_links.setdefault(message.from_user.id, {}).setdefault("msgs", []).append(msg3.message_id)
         log_message(message.from_user.id, msg3)
 
         await state.finish()
