@@ -579,7 +579,11 @@ async def open_order(call: types.CallbackQuery, state: FSMContext):
 
 @dp.callback_query_handler(lambda c: c.data.startswith("confirm:"))
 async def confirm_payment(call: types.CallbackQuery):
-    await_screenshot.add(call.from_user.id)
+    await call.answer()
+    
+    # Додаємо користувача до списку очікування скріншота
+    await_screenshot_users.add(call.from_user.id)  # <-- без await, просто .add()
+
     await call.message.answer("📸 Отправьте, пожалуйста, скриншот оплаты.")
 
 @dp.message_handler(content_types=types.ContentType.PHOTO)
