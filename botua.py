@@ -638,27 +638,29 @@ async def admin_chat_list(message: types.Message):
 
 @dp.callback_query_handler(lambda c: c.data == "close_order", state="*")
 async def close_order(call: types.CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    otype = data.get("order_type")
-
-    if otype == "buy":
-        return await call.message.answer("❌ Эта кнопка недоступна при покупке.")
-
-    try:
-        await bot.delete_message(call.message.chat.id, call.message.message_id)
-    except:
-        pass
-
-    await call.message.answer("✅ Ордер закрыт.", reply_markup=get_main_kb(call.from_user.id))
-
-    # 💬 Очистка активного чату
     user_id = call.from_user.id
+
+    # Отримуємо дані з state
+    data = await state.get_data()
+    # otype = data.get("order_type")  # Якщо не потрібен — можеш видалити
+
+    # Видалення повідомлення з кнопкою
+    try:
+        await bot.edit_message_reply_markup(chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=None)
+    except Exception as e:
+        print(f"❗ Помилка видалення кнопок: {e}")
+
+    # Надсилаємо підтвердження
+    await call.message.answer("✅ Ордер закрыт.", reply_markup=get_main_kb(user_id))
+
+    # Видаляємо ордер із активних
     pair_id = active_orders.pop(user_id, None)
     if pair_id:
         active_orders.pop(pair_id, None)
 
+    # Завершуємо стан
     await state.finish()
-
+    await call.answer()
 
 @dp.callback_query_handler(lambda c: c.data.startswith("buy:") or c.data.startswith("sell:"))
 @ban_check
@@ -868,6 +870,22 @@ async def send_balances_excel(message: types.Message):
         error_msg = await message.reply(f"⚠️ Ошибка при создании файла: {e}")
         log_message(message.from_user.id, error_msg)
 
+
+banned_users = set()  # переконайся, що є ця змінна
+
+@dp.message_handler(commands=["ban"], user_id=ADMIN_IDS)
+async def ban_user(message: types.Message):
+    try:
+        parts = message.text.split()
+        if len(parts) != 2:
+            await message.reply("❗ Использование: /ban <user_id>")
+            return
+
+        user_id = int(parts[1])
+        banned_users.add(user_id)
+        await message.reply(f"✅ Пользователь <code>{user_id}</code> заблокирован.")
+    except Exception as e:
+        await message.reply(f"⚠️ Ошибка: {e}")
 
 
 @dp.message_handler(lambda m: m.text == "➕ Добавить объявление")
