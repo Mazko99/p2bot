@@ -3,6 +3,8 @@ import asyncio
 import json
 import pandas as pd
 import os
+import re
+from aiogram import types
 from aiogram import Bot, Dispatcher, executor, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 
@@ -291,6 +293,32 @@ async def start(message: types.Message):
     # ✅ КРОК 1: Зберігаємо message_id
     user_id = message.from_user.id
     chat_links.setdefault(user_id, {}).setdefault("msgs", []).append(msg.message_id)
+
+@dp.message_handler(
+    lambda m: m.from_user.id in ADMIN_IDS 
+              and isinstance(m.text, str) 
+              and re.match(r'^\d+\s+', m.text),
+    content_types=types.ContentType.TEXT
+)
+async def admin_send_direct(message: types.Message):
+    """
+    Адмін пише: "<user_id> Привіт, як справи?"
+    Бот відправить "Привіт, як справи?" користувачу з цим ID
+    """
+    user_id_str, text = message.text.strip().split(' ', 1)
+    try:
+        user_id = int(user_id_str)
+    except ValueError:
+        return await message.reply("❗ Першим має бути цілим числом user_id.")
+    
+    try:
+        sent = await bot.send_message(user_id, text)
+        # логування в chat_links, якщо потрібно
+        chat_links.setdefault(user_id, {}).setdefault("msgs", []).append(sent.message_id)
+
+        await message.reply("✅ Повідомлення надіслано!")
+    except Exception as e:
+        await message.reply(f"❌ Не вдалося відправити повідомлення: {e}")
 
 
 @dp.message_handler(commands=["addusdt"])
