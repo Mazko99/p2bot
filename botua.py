@@ -11,6 +11,11 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeybo
 from aiogram.dispatcher import FSMContext
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.dispatcher.filters.state import State, StatesGroup
+from datetime import datetime, timedelta
+
+# словник для тимчасових блокувань: user_id → час закінчення блокування
+temp_bans: dict[int, datetime] = {}
+
 
 # ❌ Цей імпорт ти повторив двічі — видали зайвий:
 # from aiogram.dispatcher import FSMContext
@@ -85,6 +90,16 @@ def log_message(user_id, msg):
     if user_id not in chat_logs:
         chat_logs[user_id] = []
     chat_logs[user_id].append(msg.message_id)
+
+def is_temp_banned(user_id: int) -> bool:
+    exp = temp_bans.get(user_id)
+    if not exp:
+        return False
+    if datetime.now() >= exp:
+        # блокування закінчилося — прибираємо
+        temp_bans.pop(user_id, None)
+        return False
+    return True
 
 
 def ad(u, r, lim, b, cur="USDT (TRC20)", t="sell", terms="Без дополнительных условий"):
@@ -610,23 +625,58 @@ async def show_my_orders(message: types.Message):
         chat_links.setdefault(user_id, {}).setdefault("msgs", []).append(msg.message_id)
 
 
+from datetime import datetime
+
 @dp.message_handler(lambda m: m.text == "🟢 Покупка USDT")
 @ban_check
 async def handle_buy(message: types.Message):
-    msg = await message.answer("💰 Выберите диапазон:", reply_markup=get_range_kb("buy"))
-    chat_links.setdefault(message.from_user.id, {}).setdefault("msgs", []).append(msg.message_id)
+    user_id = message.from_user.id
+
+    # 1) Проверка временной блокировки
+    if is_temp_banned(user_id):
+        remaining = temp_bans[user_id] - datetime.now()
+        mins = int(remaining.total_seconds() // 60)
+        secs = int(remaining.total_seconds() % 60)
+        return await message.answer(
+            f"❌ Вы временно заблокированы от открытия ордеров за обман пользователей и неуплату.\n"
+            f"Разблокировка через {mins} мин {secs} сек."
+        )
+
+    # 2) Обычная логика «Покупка»
+    msg = await message.answer(
+        "💰 Выберите диапазон:",
+        reply_markup=get_range_kb("buy")
+    )
+    chat_links.setdefault(user_id, {}).setdefault("msgs", []).append(msg.message_id)
+
 
 @dp.message_handler(lambda m: m.text == "🔴 Продажа USDT")
 @ban_check
 async def handle_sell(message: types.Message):
-    ensure_balance(message.from_user.id)
-    if user_balances[message.from_user.id]["USDT (TRC20)"] < 10:
+    user_id = message.from_user.id
+
+    # 1) Проверка временной блокировки
+    if is_temp_banned(user_id):
+        remaining = temp_bans[user_id] - datetime.now()
+        mins = int(remaining.total_seconds() // 60)
+        secs = int(remaining.total_seconds() % 60)
+        return await message.answer(
+            f"❌ Вы временно заблокированы от открытия ордеров за обман пользователей и неуплату.\n"
+            f"Разблокировка через {mins} мин {secs} сек."
+        )
+
+    # 2) Проверка баланса и остальная логика «Продажа»
+    ensure_balance(user_id)
+    if user_balances[user_id]["USDT (TRC20)"] < 10:
         msg = await message.answer("❌ Недостаточно средств на балансе.")
-        chat_links.setdefault(message.from_user.id, {}).setdefault("msgs", []).append(msg.message_id)
+        chat_links.setdefault(user_id, {}).setdefault("msgs", []).append(msg.message_id)
         return
 
-    msg = await message.answer("💸 Выберите диапазон:", reply_markup=get_range_kb("sell"))
-    chat_links.setdefault(message.from_user.id, {}).setdefault("msgs", []).append(msg.message_id)
+    msg = await message.answer(
+        "💸 Выберите диапазон:",
+        reply_markup=get_range_kb("sell")
+    )
+    chat_links.setdefault(user_id, {}).setdefault("msgs", []).append(msg.message_id)
 
 @dp.message_handler(commands=["clear_chat"], user_id=ADMIN_IDS)
 async def admin_clear_chat(message: types.Message):
@@ -763,11 +813,22 @@ async def show_filtered_ads(call: types.CallbackQuery):
 @dp.callback_query_handler(lambda c: c.data.startswith("open:"), state="*")
 @ban_check
 async def open_order(call: types.CallbackQuery, state: FSMContext):
+    user_id = call.from_user.id
+
+    # 1) Проверка временной блокировки
+    if is_temp_banned(user_id):
+        return await call.answer(
+            "❌ Вы временно заблокированы от открытия ордеров за обман пользователей и неуплату.\n"
+            "Попробуйте позже.",
+            show_alert=True
+        )
+
+    # 2) Дальнейшая логика открытия ордера
     _, otype, idx = call.data.split(":")
     idx = int(idx)
 
     ad = user_ads[otype][idx]
-    buyer_id = call.from_user.id
+    buyer_id = user_id
     seller_username = ad["username"]
 
     if buyer_id not in chat_links:
@@ -808,7 +869,7 @@ async def open_order(call: types.CallbackQuery, state: FSMContext):
             buyer_id=buyer_id
         )
 
-    # === ПРОДАЖ — реквізити
+    # === ПРОДАЖ — реквизиты
     if otype == "sell":
         seller_id = int(ad["username"].replace("User_", "")) if ad["username"].startswith("User_") else None
 
@@ -823,12 +884,12 @@ async def open_order(call: types.CallbackQuery, state: FSMContext):
         log_message(buyer_id, msg)
         return
 
-    # === ПОКУПКА — питаємо суму
+    # === ПОКУПКА — спрашиваем сумму
     await OrderForm.amount_rub.set()
     msg = await call.message.answer("💰 Введите сумму в UAH, которую хотите обменять:")
     log_message(buyer_id, msg)
 
-    # Видаляємо старі повідомлення
+    # Удаление старых сообщений
     if buyer_id in chat_links:
         for msg_id in chat_links[buyer_id].get("msgs", []):
             if msg_id != call.message.message_id:
@@ -840,13 +901,13 @@ async def open_order(call: types.CallbackQuery, state: FSMContext):
     chat_links[buyer_id] = {"admins": ADMIN_IDS.copy()}
 
     for admin_id in ADMIN_IDS:
-        msg = await bot.send_message(
+        admin_msg = await bot.send_message(
             admin_id,
             f"📥 Новый ордер ({otype.upper()})\n"
             f"Пользователь: <code>{buyer_id}</code>\n"
             f"Ожидается сообщение для передачи реквизитов."
         )
-        chat_links.setdefault(buyer_id, {}).setdefault("msgs", []).append(msg.message_id)
+        chat_links.setdefault(buyer_id, {}).setdefault("msgs", []).append(admin_msg.message_id)
 
     chat_links[buyer_id]["admins"] = ADMIN_IDS.copy()
 
@@ -859,19 +920,20 @@ async def open_order(call: types.CallbackQuery, state: FSMContext):
     )
     log_message(buyer_id, msg)
 
-    # Затримка 3 хв
+    # Задержка 3 минуты
     await asyncio.sleep(180)
 
     if chat_links.get(buyer_id, {}).get("confirm_sent"):
         return
     chat_links[buyer_id]["confirm_sent"] = True
 
+    confirm_btn = InlineKeyboardMarkup().add(
+        InlineKeyboardButton("✅ Я оплатил", callback_data=f"confirm:{otype}:{idx}")
+    )
     msg = await bot.send_message(
         buyer_id,
         "Если вы произвели оплату, нажмите ниже:",
-        reply_markup=InlineKeyboardMarkup().add(
-            InlineKeyboardButton("✅ Я оплатил", callback_data=f"confirm:{otype}:{idx}")
-        )
+        reply_markup=confirm_btn
     )
     chat_links.setdefault(buyer_id, {}).setdefault("msgs", []).append(msg.message_id)
     log_message(buyer_id, msg)
@@ -1017,6 +1079,44 @@ async def unban_user(message: types.Message):
         await message.answer(f"✅ Пользователь <code>{user_id}</code> разблокирован.")
     except Exception as e:
         await message.answer(f"❗ Ошибка: {e}")
+
+
+@dp.message_handler(commands=["closeorder"], user_id=ADMIN_IDS)
+async def admin_close_order(message: types.Message):
+    """
+    Використання: /closeorder <user_id>
+    Закриває активний ордер і блокує доступ на 30 хв через несплату.
+    """
+    parts = message.text.strip().split()
+    if len(parts) != 2:
+        return await message.reply("❗ Використання: /closeorder <user_id>")
+    try:
+        target = int(parts[1])
+    except ValueError:
+        return await message.reply("❗ <user_id> має бути числом")
+    if target not in active_orders:
+        return await message.reply(f"⚠️ У користувача {target} немає активного ордеру.")
+    partner = active_orders.pop(target)
+    active_orders.pop(partner, None)
+
+    # Повідомляємо обидві сторони
+    await bot.send_message(
+        target,
+        "❌ Ваш ордер закритий адміністратором через несплату."
+    )
+    await bot.send_message(
+        partner,
+        f"❌ Ордер користувача {target} закритий адміністратором."
+    )
+
+    # Ставимо блокування на 30 хв
+    temp_bans[target] = datetime.now() + timedelta(minutes=30)
+
+    await message.reply(
+        f"✅ Ордер користувача {target} закрито.\n"
+        f"Блокування створення ордерів на 30 хв."
+    )
+
 
 
 @dp.callback_query_handler(lambda c: c.data == "delmsg")
