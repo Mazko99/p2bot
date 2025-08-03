@@ -1093,26 +1093,35 @@ async def admin_close_order(message: types.Message):
     except ValueError:
         return await message.reply("❗ <user_id> должен быть числом")
 
-    # 1) Если есть активный ордер — закрываем его и уведомляем обе стороны
+    # 1) Если был активный ордер — закрываем и уведомляем обе стороны
     if target in active_orders:
         partner = active_orders.pop(target)
         active_orders.pop(partner, None)
 
-        await bot.send_message(
-            target,
-            "❌ Ваш ордер закрыт администратором из-за неуплаты."
-        )
+        # уведомляем партнёра (продавца/покупателя)
         await bot.send_message(
             partner,
-            f"❌ Ордер пользователя {target} закрыт администратором."
+            f"❌ Ордер пользователя <code>{target}</code> закрыт администратором."
         )
 
-    # 2) Всегда ставим блокировку на 30 минут
-    temp_bans[target] = datetime.now() + timedelta(minutes=30)
+    # 2) Блокируем пользователя на 30 минут
+    expires = datetime.now() + timedelta(minutes=30)
+    temp_bans[target] = expires
 
+    # 3) Всегда уведомляем заблокированного пользователя
+    try:
+        await bot.send_message(
+            target,
+            "❌ Вы временно заблокированы от открытия ордеров на 30 минут "
+            "за обман пользователей и неуплату."
+        )
+    except Exception:
+        # если пользователь закрыл чат с ботом или заблокировал бота
+        pass
+
+    # 4) Подтверждение админу
     await message.reply(
-        f"✅ Пользователь <code>{target}</code> заблокирован от открытия ордеров на 30 минут "
-        f"из-за обмана/неуплаты."
+        f"✅ Пользователь <code>{target}</code> заблокирован на 30 минут."
     )
 
 
