@@ -1,6 +1,6 @@
 import logging
 import asyncio
-import jso
+import json
 import pandas as pd
 import os
 from aiogram import Bot, Dispatcher, executor, types
