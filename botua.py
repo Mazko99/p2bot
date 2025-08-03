@@ -1081,42 +1081,39 @@ async def unban_user(message: types.Message):
         await message.answer(f"❗ Ошибка: {e}")
 
 
+from datetime import datetime, timedelta
+
 @dp.message_handler(commands=["closeorder"], user_id=ADMIN_IDS)
 async def admin_close_order(message: types.Message):
-    """
-    Використання: /closeorder <user_id>
-    Закриває активний ордер і блокує доступ на 30 хв через несплату.
-    """
     parts = message.text.strip().split()
     if len(parts) != 2:
-        return await message.reply("❗ Використання: /closeorder <user_id>")
+        return await message.reply("❗ Использование: /closeorder <user_id>")
     try:
         target = int(parts[1])
     except ValueError:
-        return await message.reply("❗ <user_id> має бути числом")
-    if target not in active_orders:
-        return await message.reply(f"⚠️ У користувача {target} немає активного ордеру.")
-    partner = active_orders.pop(target)
-    active_orders.pop(partner, None)
+        return await message.reply("❗ <user_id> должен быть числом")
 
-    # Повідомляємо обидві сторони
-    await bot.send_message(
-        target,
-        "❌ Ваш ордер закритий адміністратором через несплату."
-    )
-    await bot.send_message(
-        partner,
-        f"❌ Ордер користувача {target} закритий адміністратором."
-    )
+    # 1) Если есть активный ордер — закрываем его и уведомляем обе стороны
+    if target in active_orders:
+        partner = active_orders.pop(target)
+        active_orders.pop(partner, None)
 
-    # Ставимо блокування на 30 хв
+        await bot.send_message(
+            target,
+            "❌ Ваш ордер закрыт администратором из-за неуплаты."
+        )
+        await bot.send_message(
+            partner,
+            f"❌ Ордер пользователя {target} закрыт администратором."
+        )
+
+    # 2) Всегда ставим блокировку на 30 минут
     temp_bans[target] = datetime.now() + timedelta(minutes=30)
 
     await message.reply(
-        f"✅ Ордер користувача {target} закрито.\n"
-        f"Блокування створення ордерів на 30 хв."
+        f"✅ Пользователь <code>{target}</code> заблокирован от открытия ордеров на 30 минут "
+        f"из-за обмана/неуплаты."
     )
-
 
 
 @dp.callback_query_handler(lambda c: c.data == "delmsg")
