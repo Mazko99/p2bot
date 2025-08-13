@@ -574,7 +574,7 @@ async def handle_withdraw(message: types.Message):
     usdt_balance = user_balances[message.from_user.id]["USDT (TRC20)"]
 
     if usdt_balance < 1:
-        msg = await message.answer("❌ Недостаточно средств для вывода. Минимум 10 USDT.")
+        msg = await message.answer("❌ Недостаточно средств для вывода. Минимум 20 USDT.")
         chat_links.setdefault(message.from_user.id, {}).setdefault("msgs", []).append(msg.message_id)
         return
 
