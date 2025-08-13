@@ -448,7 +448,7 @@ async def send_backup_file(message: types.Message):
 async def handle_top_up(message: types.Message):
     txt = (
         f"💳 Отправьте USDT на адрес ниже:\n\n{get_wallets_text()}\n\n"
-        f"⚠️ Мин. сумма пополнения — <b>{MIN_TOPUP}$</b>.\n"
+        f"⚠️ Мин. сумма пополнения — <b>20$</b>.\n"
         f"После оплаты нажмите кнопку ниже."
     )
     msg = await message.answer(
